@@ -1,0 +1,68 @@
+{
+    "braille": {
+        "en6":{
+            "name": "Анлийский (6-точечный)",
+            "data": "en6"
+        },
+        "ru6": {
+            "name": "Русский (6-точечный)",
+            "data": "ru6"
+        }
+    },
+    "ciphers": {
+        "caesar": {
+            "name": "Шифр Цезаря",
+            "data": "caesar",
+            "alps": {
+                "ru": {
+                    "name": "Русский",
+                    "data": "ru"
+                },
+                "en": {
+                    "name": "Английский",
+                    "data": "en"
+                }
+            }
+        },
+        "A1Z26": {
+            "name": "Шифр A1Z26",
+            "data": "A1Z26",
+            "alps": {
+                "ru": {
+                    "name": "Русский",
+                    "data": "ru"
+                },
+                "en": {
+                    "name": "Английский",
+                    "data": "en"
+                }
+            }
+        }
+    },
+    "morse": {
+        "ru": {
+            "name": "Русский",
+            "data": "ru"
+        },
+        "en": {
+            "name": "Английский",
+            "data": "en"
+        }
+    },
+    "number_systems": {
+        "standart": {
+            "name": "Стандартный (до 36)",
+            "data": "standart"
+        }
+    },
+    "binary": {
+        "utf-8": {
+            "name": "UTF-8",
+            "data": "utf-8"
+        },
+        "utf-16": {
+            "name": "UTF-16",
+            "data": "utf-16"
+        }
+    }
+}
