@@ -16,13 +16,13 @@ from PyQt6.QtWidgets import (
 import actions  # модуль с реализацией самих преобразований (Morse и т.д.)
 
 from ConverterWidgets import (
-    Ui_MainWindow,        # строитель интерфейса главного окна
-    SettingsDialog,       # диалог настроек
-    ActionWidget,         # карточка одного действия в списке
-    OperationForm,        # форма параметров операции
-    get_palette,          # получить палитру текущей темы
-    build_app_qss,        # собрать QSS из палитры
-    build_app_palette,    # собрать QPalette из палитры
+    Ui_MainWindow,  # строитель интерфейса главного окна
+    SettingsDialog,  # диалог настроек
+    ActionWidget,  # карточка одного действия в списке
+    OperationForm,  # форма параметров операции
+    get_palette,  # получить палитру текущей темы
+    build_app_qss,  # собрать QSS из палитры
+    build_app_palette,  # собрать QPalette из палитры
 )
 
 from exceptions import (
@@ -33,10 +33,10 @@ from exceptions import (
     MissingSpaceSymbolError,
 )
 
-
 # ============================================================
 #   MainWindow — главное окно приложения
 # ============================================================
+
 
 class MainWindow(QMainWindow, Ui_MainWindow):
     """
@@ -87,7 +87,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             self._on_color_scheme_changed
         )
 
-        self.saveFormats = ['Text Files (*.txt)', 'All Files (*)']
+        self.saveFormats = ["Text Files (*.txt)", "All Files (*)"]
 
     # --------------------------------------------------------
     #   Управление списком действий
@@ -104,7 +104,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         w = ActionWidget()
         w.removed.connect(self._on_action_removed)
         w.move_up.connect(self._move_action_up)
-        w.move_down.connect(self._move_action_down) 
+        w.move_down.connect(self._move_action_down)
 
         # count() - 1 — позиция stretch; вставляем перед ним
         self.actionsLayout.insertWidget(self.actionsLayout.count() - 1, w)
@@ -215,27 +215,27 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         """
         if not self.file_name or saveAs:
             file_name, filter = QFileDialog.getSaveFileName(
-                self, "Сохранить текст", "", ';;'.join(self.saveFormats)
+                self, "Сохранить текст", "", ";;".join(self.saveFormats)
             )
         else:
             file_name = self.file_name
 
         if file_name:
             text = self.outText.toPlainText()
-            if filter == 'Text Files (*.txt)':
+            if filter == "Text Files (*.txt)":
                 with open(file_name, "w", encoding="utf-8") as file:
                     file.write(text)
                 self.file_name = file_name
             else:
                 from shutil import copy2
                 from pathlib import Path
-                src = Path('temp_morse.wav')
+
+                src = Path("temp_morse.wav")
                 dst = Path(file_name)
                 if not dst.suffix:
                     dst = dst.with_suffix(filter[-5:-1])
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 copy2(src, dst)
-
 
     # --------------------------------------------------------
     #   Настройки
@@ -291,7 +291,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         import struct
         import math
 
-
         SAMPLE_RATE = 44100
         FREQ = 800.0
         WPM = 25
@@ -309,32 +308,32 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             i = 0
             for ch in morse:
                 match ch:
-                    case '.':
+                    case ".":
                         samples += tone(UNIT)
                         samples += silence(UNIT)
-                    case '-':
+                    case "-":
                         samples += tone(UNIT * 3)
                         samples += silence(UNIT)
-                    case ' ':
+                    case " ":
                         samples += silence(UNIT * 2)
-                    case '/':
+                    case "/":
                         samples += silence(UNIT * 6)
                 samples += silence(UNIT * 2)
 
-            with wave.open('temp_morse.wav', 'w') as w:
+            with wave.open("temp_morse.wav", "w") as w:
                 w.setnchannels(1)
                 w.setsampwidth(2)
                 w.setframerate(SAMPLE_RATE)
-                frames = b''.join(
-                    struct.pack('<h', int(max(-1.0, min(1.0, s)) * 32767))
+                frames = b"".join(
+                    struct.pack("<h", int(max(-1.0, min(1.0, s)) * 32767))
                     for s in samples
                 )
                 w.writeframes(frames)
+
         morse_to_audio()
 
         self.player.reload_source()
         self.tBarWidget.show()
-                    
 
     # --------------------------------------------------------
     #   Выполнение цепочки действий
@@ -364,21 +363,24 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             type_ind = f.typeCombo.currentIndex()
             code_radio = f.codeRadio.isChecked()
 
-            if 'MP3 Files (*.mp3)' in self.saveFormats:
-                self.saveFormats.remove('MP3 Files (*.mp3)')
-                self.saveFormats.remove('WAV Files (*.wav)')
+            if "MP3 Files (*.mp3)" in self.saveFormats:
+                self.saveFormats.remove("MP3 Files (*.mp3)")
+                self.saveFormats.remove("WAV Files (*.wav)")
             self.tBarWidget.hide()
 
             match type_ind:
                 case 0:  # Морзе
                     try:
-                        morse = actions.Morse(f"alphabets/morse/{f.alphabetCombo.currentData()}.json", text)
+                        morse = actions.Morse(
+                            f"alphabets/morse/{f.alphabetCombo.currentData()}.json",
+                            text,
+                        )
                         if code_radio:
                             text = morse.code()
                             self.audio_morse(text)
-                            if 'MP3 Files (*.mp3)' not in self.saveFormats:
-                                self.saveFormats.insert(1, 'MP3 Files (*.mp3)')
-                                self.saveFormats.insert(2, 'WAV Files (*.wav)')
+                            if "MP3 Files (*.mp3)" not in self.saveFormats:
+                                self.saveFormats.insert(1, "MP3 Files (*.mp3)")
+                                self.saveFormats.insert(2, "WAV Files (*.wav)")
                         else:
                             text = morse.encode()
 
@@ -397,13 +399,13 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                         self.outText.setPlainText(e.message)
                         QMessageBox.critical(self, "Ошибка", e.message)
 
-                case 1:
+                case 1:  # Системы счисления
                     try:
                         conv = actions.NumberSystem(
                             f"alphabets/number_systems/{f.alphabetCombo.currentData()}.json",
                             f.inpSpin.value(),
                             f.operSpin.value(),
-                            text
+                            text,
                         )
                         text = conv.oper()
                     except ActionError as e:
@@ -412,18 +414,31 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                             f"{partial}\n[{e.message}]" if partial else e.message
                         )
                         QMessageBox.critical(self, "Ошибка", e.message)
+
                 case 2:  # Шифры
                     try:
                         oper_ind = f.operCombo.currentIndex()
-                        alphabet_path = f"alphabets/ciphers/{'caesar' if oper_ind == 0 else 'A1Z26'}/{f.alphabetCombo.currentData()}.json"
+                        alphabet_path = f"alphabets/ciphers/{f.operCombo.currentData()}/{f.alphabetCombo.currentData()}.json"
 
-                        if oper_ind == 0:  # Цезарь
-                            shift = f.operSpin.value()
-                            cipher = actions.Caesar(alphabet_path, text, shift)
-                        elif oper_ind == 1:  # A1Z26
-                            cipher = actions.A1Z26(alphabet_path, text)
-                        else:
-                            continue
+                        match oper_ind:
+
+                            case 0:  # Цезарь
+                                shift = f.operSpin.value()
+                                cipher = actions.Caesar(alphabet_path, text, shift)
+
+                            case 1: # Виженёр
+                                key = f.keyEdit.text()
+                                cipher = actions.Vigenere(alphabet_path, text, key)
+
+                            case 2:  # A1Z26
+                                cipher = actions.A1Z26(alphabet_path, text)
+
+                            case 3: # Атбаш
+                                cipher = actions.Atbash(alphabet_path, text)
+
+                            case 4: # Плейфер
+                                key = f.keyEdit.text()
+                                cipher = actions.Playfair(alphabet_path, text, key)
 
                         if code_radio:
                             text = cipher.code()
@@ -441,9 +456,13 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                     except ActionError as e:
                         self.outText.setPlainText(e.message)
                         QMessageBox.critical(self, "Ошибка", e.message)
-                case 3:
+
+                case 3:  # Брайль
                     try:
-                        braille = actions.Braille(f"alphabets/braille/{f.alphabetCombo.currentData()}.json", text)
+                        braille = actions.Braille(
+                            f"alphabets/braille/{f.alphabetCombo.currentData()}.json",
+                            text,
+                        )
                         if code_radio:
                             text = braille.code()
                         else:
@@ -451,10 +470,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
                     except (UnknownSymbolError, MissingSpaceSymbolError) as e:
                         # Показываем уже закодированную часть + пояснение
-                        self.outText.setPlainText(
-                            f"{e.partial_out}\n"
-                            f"[{e.message}]"
-                        )
+                        self.outText.setPlainText(f"{e.partial_out}\n" f"[{e.message}]")
                         QMessageBox.critical(self, "Ошибка", e.message)
 
                     except (InvalidAlphabetError, MissingSpacerError) as e:
@@ -466,7 +482,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                         # Общий fallback на будущее
                         self.outText.setPlainText(e.message)
                         QMessageBox.critical(self, "Ошибка", e.message)
-                case 4:
+
+                case 4:  # Бинарный код
                     try:
                         binary = actions.Bytes(text, f.alphabetCombo.currentData())
                         if code_radio:
@@ -475,7 +492,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                             text = binary.encode()
                     except:
                         pass
-                        
+
         self.outText.setPlainText(text)
 
 

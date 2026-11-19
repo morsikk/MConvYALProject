@@ -1,0 +1,13 @@
+{
+    "meta": {
+        "name": "Английский",
+        "data": "en",
+        "rows": 5,
+        "cols": 5,
+        "filler": "X",
+        "aliases": {
+            "J": "I"
+        }
+    },
+    "letters": "ABCDEFGHIKLMNOPQRSTUVWXYZ"
+}

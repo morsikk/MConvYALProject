@@ -24,9 +24,51 @@
                 }
             }
         },
+        "vigenere": {
+            "name": "Шифр Виженёра",
+            "data": "vigenere",
+            "alps": {
+                "ru": {
+                    "name": "Русский",
+                    "data": "ru"
+                },
+                "en": {
+                    "name": "Английский",
+                    "data": "en"
+                }
+            }
+        },
         "A1Z26": {
             "name": "Шифр A1Z26",
             "data": "A1Z26",
+            "alps": {
+                "ru": {
+                    "name": "Русский",
+                    "data": "ru"
+                },
+                "en": {
+                    "name": "Английский",
+                    "data": "en"
+                }
+            }
+        },
+        "atbash": {
+            "name": "Шифр Атбаш",
+            "data": "atbash",
+            "alps": {
+                "ru": {
+                    "name": "Русский",
+                    "data": "ru"
+                },
+                "en": {
+                    "name": "Английский",
+                    "data": "en"
+                }
+            }
+        },
+        "playfair": {
+            "name": "Шифр Плейфера",
+            "data": "playfair",
             "alps": {
                 "ru": {
                     "name": "Русский",

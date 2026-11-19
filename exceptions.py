@@ -2,6 +2,7 @@
 #   exceptions.py — кастомные исключения приложения
 # ============================================================
 
+
 class ActionError(Exception):
     """
     Базовое исключение для всех ошибок модуля actions.
@@ -33,7 +34,7 @@ class UnknownSymbolError(ActionError):
         partial_out: str,
         message: str = "<-- этот символ отсутствует в выбранном словаре!",
     ) -> None:
-        super().__init__(f'{symbol} {message}')
+        super().__init__(f"{symbol} {message}")
         self.partial_out = partial_out
 
 
@@ -48,12 +49,42 @@ class InvalidAlphabetError(ActionError):
 
     def __init__(self, path: str, missing: list[str]) -> None:
         message = (
-            f"Некорректный алфавит '{path}': "
-            f"отсутствуют или пусты поля {missing}"
+            f"Некорректный алфавит '{path}': " f"отсутствуют или пусты поля {missing}"
         )
         super().__init__(message)
         self.path = path
         self.missing = missing
+
+
+class InvalidKeySymbolError(ActionError):
+    """
+    В ключе шифра Виженёра встретился символ, которого нет
+    в алфавите.
+
+    Атрибуты:
+        symbol:       символ ключа, отсутствующий в алфавите;
+        position:     позиция этого символа в ключе (0-based);
+        key:          ключ целиком (для диагностики);
+        alphabet_path: путь к JSON-алфавиту;
+        message:      текстовое пояснение.
+    """
+
+    def __init__(
+        self,
+        symbol: str,
+        position: int,
+        key: str,
+        alphabet_path: str,
+        message: str = "<-- этого символа ключа нет в выбранном словаре!",
+    ) -> None:
+        super().__init__(
+            f"Ключ {key!r}: символ {symbol!r} на позиции {position} "
+            f"{message} (алфавит: '{alphabet_path}')"
+        )
+        self.symbol = symbol
+        self.position = position
+        self.key = key
+        self.alphabet_path = alphabet_path
 
 
 class MissingSpacerError(ActionError):

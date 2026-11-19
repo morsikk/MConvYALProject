@@ -5,18 +5,12 @@
 import json
 from fractions import Fraction
 
-from exceptions import (
-    ActionError,
-    UnknownSymbolError,
-    InvalidAlphabetError,
-    MissingSpacerError,
-    MissingSpaceSymbolError,
-)
-
+import exceptions as exs
 
 # ============================================================
 #   Action — базовый класс
 # ============================================================
+
 
 class Action:
     """
@@ -42,12 +36,9 @@ class Action:
         self.out: list[str] = []
 
     def _validate_alphabet(self) -> None:
-        missing = [
-            key for key in self.REQUIRED_KEYS
-            if not self.alphabet.get(key)
-        ]
+        missing = [key for key in self.REQUIRED_KEYS if not self.alphabet.get(key)]
         if missing:
-            raise InvalidAlphabetError(self.alphabet_path, missing)
+            raise exs.InvalidAlphabetError(self.alphabet_path, missing)
 
     def _reset_output(self) -> None:
         self.out = []
@@ -56,6 +47,7 @@ class Action:
 # ============================================================
 #   Morse — кодирование/декодирование азбукой Морзе
 # ============================================================
+
 
 class Morse(Action):
     """
@@ -79,7 +71,7 @@ class Morse(Action):
 
         # spacer нужен именно для Морзе
         if self.alphabet["meta"].get("spacer") is None:
-            raise MissingSpacerError(self.alphabet_path)
+            raise exs.MissingSpacerError(self.alphabet_path)
 
         self.inp = self.inp.upper()
 
@@ -90,9 +82,7 @@ class Morse(Action):
         for ch, code in self.alphabet["letters"].items():
             self._code_to_char.setdefault(code, ch)
 
-        self._max_code_len = max(
-            (len(c) for c in self._code_to_char), default=1
-        )
+        self._max_code_len = max((len(c) for c in self._code_to_char), default=1)
 
     # --------------------------------------------------------
     #   Кодирование
@@ -111,17 +101,15 @@ class Morse(Action):
             ch = self.inp[i]
 
             if ch == " " and not self._has_space_symbol:
-                raise MissingSpaceSymbolError(
-                    " ", spacer.join(self.out)
-                )
+                raise exs.MissingSpaceSymbolError(" ", spacer.join(self.out))
 
             if value_len <= 0:
-                raise UnknownSymbolError(
+                raise exs.UnknownSymbolError(
                     symbol=ch,
                     partial_out=spacer.join(self.out),
                 )
 
-            chunk = self.inp[i:i + value_len]
+            chunk = self.inp[i : i + value_len]
             value = letters.get(chunk)
             if value is None:
                 value_len -= 1
@@ -154,9 +142,7 @@ class Morse(Action):
             if seg == "":
                 if 0 < idx < len(segments) - 1:
                     if not self._has_space_symbol:
-                        raise MissingSpaceSymbolError(
-                            " ", "".join(result_parts)
-                        )
+                        raise exs.MissingSpaceSymbolError(" ", "".join(result_parts))
                     result_parts.append(" ")
                 continue
 
@@ -171,7 +157,7 @@ class Morse(Action):
                     continue
                 ch = self._code_to_char.get(code)
                 if ch is None:
-                    raise UnknownSymbolError(
+                    raise exs.UnknownSymbolError(
                         symbol=code,
                         partial_out="".join(result_parts),
                     )
@@ -185,6 +171,7 @@ class Morse(Action):
 # ============================================================
 #   NumberSystem — перевод между системами счисления
 # ============================================================
+
 
 class NumberSystem(Action):
     """
@@ -218,7 +205,7 @@ class NumberSystem(Action):
         self.outSys = int(outSys)
 
         if self.inpSys < 2 or self.outSys < 2:
-            raise ActionError(
+            raise exs.ActionError(
                 f"Основание системы счисления должно быть >= 2 "
                 f"(получено {self.inpSys} -> {self.outSys})"
             )
@@ -241,8 +228,7 @@ class NumberSystem(Action):
 
         # допустимые цифры входной системы (строго < inpSys)
         self._allowed = {
-            sym for sym, val in self._digit_value.items()
-            if 0 <= val < self.inpSys
+            sym for sym, val in self._digit_value.items() if 0 <= val < self.inpSys
         }
 
     # --------------------------------------------------------
@@ -350,7 +336,7 @@ class NumberSystem(Action):
             for ch in part:
                 v = self._digit_value.get(ch.upper())
                 if v is None or v >= self.inpSys:
-                    raise UnknownSymbolError(symbol=ch, partial_out="")
+                    raise exs.UnknownSymbolError(symbol=ch, partial_out="")
                 value = value * self.inpSys + v
             return value
 
@@ -384,7 +370,7 @@ class NumberSystem(Action):
         if int_part == 0:
             sym0 = self._value_digit.get(0)
             if sym0 is None:
-                raise UnknownSymbolError(symbol="0", partial_out="")
+                raise exs.UnknownSymbolError(symbol="0", partial_out="")
             int_digits.append(sym0)
         else:
             n = int_part
@@ -392,7 +378,7 @@ class NumberSystem(Action):
                 n, r = divmod(n, self.outSys)
                 sym = self._value_digit.get(r)
                 if sym is None:
-                    raise UnknownSymbolError(
+                    raise exs.UnknownSymbolError(
                         symbol=str(r),
                         partial_out="".join(reversed(int_digits)),
                     )
@@ -410,7 +396,7 @@ class NumberSystem(Action):
                 frac_part -= d
                 sym = self._value_digit.get(d)
                 if sym is None:
-                    raise UnknownSymbolError(
+                    raise exs.UnknownSymbolError(
                         symbol=str(d),
                         partial_out=result + "." + "".join(frac_digits),
                     )
@@ -462,6 +448,7 @@ class NumberSystem(Action):
 #   Braille — кодирование/декодирование шрифтом Брайля
 # ============================================================
 
+
 class Braille(Action):
     """
     Кодирование и декодирование текста шрифтом Брайля.
@@ -508,9 +495,7 @@ class Braille(Action):
         prefixes = self.alphabet.get("prefixes") or {}
         self._num_prefix = self._prefix_char(prefixes, "num_prefix")
         self._cap_prefix = self._prefix_char(prefixes, "capital_prefix")
-        self._cap_word_prefix = self._prefix_char(
-            prefixes, "capital_word_prefix"
-        )
+        self._cap_word_prefix = self._prefix_char(prefixes, "capital_word_prefix")
 
         # ---- отдельные карты: буквы и цифры ----
         # (у них общие коды — ⠁ = А и 1, и т.п.)
@@ -554,9 +539,7 @@ class Braille(Action):
         self._word_sep = self._char_to_code.get(" ", " ")
 
         # максимальная длина кода для жадного кодирования/декодирования
-        self._max_code_len = max(
-            (len(c) for c in self._char_to_code), default=1
-        )
+        self._max_code_len = max((len(c) for c in self._char_to_code), default=1)
 
         # символы, которые НЕ являются разделителями слов при
         # декодировании (буквы/цифры/прочие символы из алфавита)
@@ -587,7 +570,6 @@ class Braille(Action):
         """Символ — часть слова (буква или цифра), а не разделитель."""
         return ch.isalnum()
 
-
     # --------------------------------------------------------
     #   Кодирование
     # --------------------------------------------------------
@@ -608,7 +590,7 @@ class Braille(Action):
         """
         self._reset_output()
 
-        s = self.inp                    # ← оригинал, регистр сохраняем
+        s = self.inp  # ← оригинал, регистр сохраняем
         max_len = self._max_code_len
         value_len = max_len
         i = 0
@@ -637,11 +619,7 @@ class Braille(Action):
             #     всё ли оно в верхнем регистре ---
             if ch.isalpha() and ch.upper() in self._letter_to_code:
                 word_start = i
-                while (
-                    i < n
-                    and s[i].isalpha()
-                    and s[i].upper() in self._letter_to_code
-                ):
+                while i < n and s[i].isalpha() and s[i].upper() in self._letter_to_code:
                     i += 1
                 word = s[word_start:i]
                 self._emit_word(word)
@@ -649,12 +627,12 @@ class Braille(Action):
                 continue
 
             if value_len <= 0:
-                raise UnknownSymbolError(
+                raise exs.UnknownSymbolError(
                     symbol=ch,
                     partial_out="".join(self.out),
                 )
 
-            chunk = s[i:i + value_len]
+            chunk = s[i : i + value_len]
             code = self._char_to_code.get(chunk)
             if code is None:
                 value_len -= 1
@@ -679,10 +657,7 @@ class Braille(Action):
         - иначе каждая заглавная буква получает capital_prefix,
           строчные идут без префикса.
         """
-        is_all_upper = (
-            len(word) >= 2
-            and all(c.isupper() for c in word)
-        )
+        is_all_upper = len(word) >= 2 and all(c.isupper() for c in word)
 
         if is_all_upper and self._cap_word_prefix is not None:
             self.out.append(self._cap_word_prefix)
@@ -722,8 +697,8 @@ class Braille(Action):
         i = 0
 
         # состояние
-        num_mode = False       # числовой режим на слово
-        cap_mode = False       # одна буква заглавная
+        num_mode = False  # числовой режим на слово
+        cap_mode = False  # одна буква заглавная
         cap_word_mode = False  # всё слово заглавное
 
         # префиксы — от самого длинного
@@ -772,7 +747,7 @@ class Braille(Action):
             code = None
             length = 0
             for ln in range(min(self._max_code_len, n - i), 0, -1):
-                candidate = s[i:i + ln]
+                candidate = s[i : i + ln]
                 if (
                     candidate in self._code_to_letter
                     or candidate in self._code_to_digit
@@ -783,9 +758,7 @@ class Braille(Action):
                     break
 
             if code is None:
-                raise UnknownSymbolError(
-                    symbol=ch, partial_out="".join(result)
-                )
+                raise exs.UnknownSymbolError(symbol=ch, partial_out="".join(result))
 
             # выбор трактовки в зависимости от режима
             out_sym = None
@@ -834,6 +807,7 @@ class Braille(Action):
 #   Bytes — перевод текста в бинарный код
 # ============================================================
 
+
 class Bytes(Action):
     """
     Перевод текста в бинарный код в указанной кодировке.
@@ -873,9 +847,7 @@ class Bytes(Action):
         try:
             "".encode(self.enc)
         except LookupError:
-            raise ActionError(
-                f"Неизвестная кодировка: {self.enc!r}"
-            )
+            raise exs.ActionError(f"Неизвестная кодировка: {self.enc!r}")
 
     # --------------------------------------------------------
     #   Вспомогательное
@@ -886,9 +858,7 @@ class Bytes(Action):
         try:
             return self.inp.encode(self.enc)
         except UnicodeEncodeError as e:
-            raise ActionError(
-                f"Не удалось закодировать текст в {self.enc!r}: {e}"
-            )
+            raise exs.ActionError(f"Не удалось закодировать текст в {self.enc!r}: {e}")
 
     @staticmethod
     def _byte_to_bits(b: int) -> str:
@@ -931,21 +901,14 @@ class Bytes(Action):
             return ""
 
         if len(bits) % 8 != 0:
-            raise ActionError(
-                f"Длина битовой строки ({len(bits)}) не кратна 8"
-            )
+            raise exs.ActionError(f"Длина битовой строки ({len(bits)}) не кратна 8")
 
-        data = bytes(
-            int(bits[i:i + 8], 2)
-            for i in range(0, len(bits), 8)
-        )
+        data = bytes(int(bits[i : i + 8], 2) for i in range(0, len(bits), 8))
 
         try:
             result = data.decode(self.enc)
         except UnicodeDecodeError as e:
-            raise ActionError(
-                f"Не удалось декодировать байты в {self.enc!r}: {e}"
-            )
+            raise exs.ActionError(f"Не удалось декодировать байты в {self.enc!r}: {e}")
 
         self.out = [result]
         return result
@@ -958,6 +921,7 @@ class Bytes(Action):
 # ============================================================
 #   Caesar — шифр Цезаря
 # ============================================================
+
 
 class Caesar(Action):
     """
@@ -986,7 +950,7 @@ class Caesar(Action):
 
         letters = self.alphabet.get("letters")
         if not isinstance(letters, str):
-            raise InvalidAlphabetError(
+            raise exs.InvalidAlphabetError(
                 self.alphabet_path, ["letters (должна быть строкой)"]
             )
 
@@ -994,15 +958,12 @@ class Caesar(Action):
         self._n = len(letters)
 
         if self._n < 2:
-            raise ActionError(
-                f"Алфавит для шифра Цезаря слишком короткий "
-                f"(длина {self._n})"
+            raise exs.ActionError(
+                f"Алфавит для шифра Цезаря слишком короткий " f"(длина {self._n})"
             )
 
         # карта символ -> индекс и обратная
-        self._char_to_idx: dict[str, int] = {
-            ch: i for i, ch in enumerate(letters)
-        }
+        self._char_to_idx: dict[str, int] = {ch: i for i, ch in enumerate(letters)}
         self._idx_to_char: list[str] = list(letters)
 
         if shift is not None:
@@ -1082,6 +1043,7 @@ class Caesar(Action):
 #   A1Z26 — числовое кодирование по позиции в алфавите
 # ============================================================
 
+
 class A1Z26(Action):
     """
     Кодирование «буква -> её номер в алфавите» и обратно.
@@ -1111,12 +1073,14 @@ class A1Z26(Action):
     spacer для этой операции НЕ требуется.
     """
 
-    def __init__(self, alphabet: str, inp: str, sep: str = None, enc: str = "utf-8") -> None:
+    def __init__(
+        self, alphabet: str, inp: str, sep: str = None, enc: str = "utf-8"
+    ) -> None:
         super().__init__(alphabet, inp, enc)
 
         letters = self.alphabet.get("letters")
         if not isinstance(letters, str):
-            raise InvalidAlphabetError(
+            raise exs.InvalidAlphabetError(
                 self.alphabet_path, ["letters (должна быть строкой)"]
             )
 
@@ -1124,14 +1088,10 @@ class A1Z26(Action):
         self._n = len(letters)
 
         if self._n < 1:
-            raise ActionError("Алфавит для A1Z26 пуст")
+            raise exs.ActionError("Алфавит для A1Z26 пуст")
 
-        self._char_to_num: dict[str, int] = {
-            ch: i + 1 for i, ch in enumerate(letters)
-        }
-        self._num_to_char: dict[int, str] = {
-            i + 1: ch for i, ch in enumerate(letters)
-        }
+        self._char_to_num: dict[str, int] = {ch: i + 1 for i, ch in enumerate(letters)}
+        self._num_to_char: dict[int, str] = {i + 1: ch for i, ch in enumerate(letters)}
 
         meta = self.alphabet.get("meta") or {}
         if sep:
@@ -1172,11 +1132,11 @@ class A1Z26(Action):
         Буквы -> числа, разделённые self.sep.
         Символы вне алфавита сохраняются, а числа вокруг них
         разделяются self.sep (чтобы декодирование было однозначным).
+        Литеральный self.sep в исходном тексте экранируется удвоением.
         """
         self._reset_output()
 
         parts: list[str] = []
-        # накапливаем подряд идущие числа, чтобы вставлять sep между ними
         number_run: list[str] = []
 
         def flush_numbers() -> None:
@@ -1189,7 +1149,11 @@ class A1Z26(Action):
             found = self._lookup(ch)
             if found is None:
                 flush_numbers()
-                parts.append(ch)
+                # экранируем литеральный разделитель
+                if ch == self.sep:
+                    parts.append(self.sep * 2)
+                else:
+                    parts.append(ch)
                 continue
 
             num, _ = found
@@ -1209,6 +1173,11 @@ class A1Z26(Action):
         """
         Числа (разделённые self.sep, пробелами или переводами строк)
         -> буквы. Всё прочее сохраняется как есть.
+
+        Одиночный sep между числами — разделитель (не выводится):
+            1-2   -> АБ
+        Двойной sep — экранированный литеральный sep:
+            1--2  -> А-Б
         """
         self._reset_output()
 
@@ -1216,11 +1185,8 @@ class A1Z26(Action):
             self.out = [""]
             return ""
 
-        # Разбиваем на «числовые» и «прочие» куски.
-        # Числовой кусок: последовательность цифр, разделённая sep
-        # (или пробельными символами).
         result: list[str] = []
-        buf: list[str] = []          # накопленные цифры текущего числа
+        buf: list[str] = []
         in_number = False
 
         def flush_number() -> None:
@@ -1231,14 +1197,13 @@ class A1Z26(Action):
             try:
                 num = int("".join(buf))
             except ValueError:
-                # не должно случаться, но на всякий случай
                 result.append("".join(buf))
                 buf = []
                 in_number = False
                 return
             ch = self._num_to_char.get(num)
             if ch is None:
-                raise UnknownSymbolError(
+                raise exs.UnknownSymbolError(
                     symbol=str(num),
                     partial_out="".join(result),
                 )
@@ -1258,9 +1223,23 @@ class A1Z26(Action):
                 i += 1
                 continue
 
-            # разделитель чисел
-            if in_number and (ch == self.sep or ch.isspace()):
+            # sep: одиночный — разделитель, двойной — литерал
+            if in_number and ch == self.sep:
+                # экранированный литерал: sep + sep
+                if i + 1 < n and s[i + 1] == self.sep:
+                    flush_number()
+                    result.append(self.sep)
+                    i += 2
+                    continue
+                # обычный разделитель чисел
                 flush_number()
+                i += 1
+                continue
+
+            # пробельные символы разделяют числа, но СОХРАНЯЮТСЯ
+            if in_number and ch.isspace():
+                flush_number()
+                result.append(ch)
                 i += 1
                 continue
 
@@ -1270,6 +1249,362 @@ class A1Z26(Action):
             i += 1
 
         flush_number()
+
+        out = "".join(result)
+        self.out = [out]
+        return out
+
+    def oper(self) -> str:
+        return self.code()
+
+
+# ============================================================
+#   Vigenere — шифр Виженёра
+# ============================================================
+
+
+# ============================================================
+#   Playfair — биграммный шифр Плейфера
+# ============================================================
+
+
+class Playfair(Action):
+    """
+    Шифр Плейфера (биграммный шифр).
+
+    JSON-алфавит:
+        {
+            "meta": {
+                "rows":   <int>,   # число строк таблицы
+                "cols":   <int>,   # число столбцов таблицы
+                "filler": "<символ>"  # заполнитель (по умолчанию "X")
+            },
+            "letters": "<строка символов алфавита>"
+        }
+
+    Таблица заполняется ключом (уникальные символы ключа,
+    затем оставшиеся символы алфавита в порядке "letters").
+    Размеры таблицы берутся из meta; len(letters) должен
+    совпадать с rows * cols.
+
+    Правила (классические):
+        - вход приводится к верхнему регистру;
+        - пробелы и любые символы, которых нет в алфавите,
+          УДАЛЯЮТСЯ (не сохраняются в выводе);
+        - текст разбивается на биграммы; если в биграмме
+          две одинаковые буквы — между ними вставляется filler;
+        - если длина нечётная — в конец добавляется filler;
+        - для каждой биграммы:
+            * в одной строке  -> сдвиг вправо (code) / влево (encode);
+            * в одном столбце -> сдвиг вниз (code) / вверх (encode);
+            * прямоугольник   -> замена на символы из тех же строк,
+                                 но из столбца партнёра.
+
+    Неизвестные символы (которых нет в алфавите) НЕ вызывают
+    ошибку при кодировании — они просто игнорируются (так
+    требует классическое правило «пробелы не сохраняются»).
+    Если нужно строгое поведение, как в Morse, — см. комментарий
+    в _normalize().
+    """
+
+    def __init__(self, alphabet: str, inp: str, key: str, enc: str = "utf-8") -> None:
+        super().__init__(alphabet, inp, enc)
+
+        letters = self.alphabet.get("letters")
+        if not isinstance(letters, str):
+            raise exs.InvalidAlphabetError(
+                self.alphabet_path, ["letters (должна быть строкой)"]
+            )
+        self._letters = letters
+        self._n = len(letters)
+
+        meta = self.alphabet.get("meta") or {}
+
+        # --- размеры таблицы ---
+        try:
+            self.rows = int(meta["rows"])
+            self.cols = int(meta["cols"])
+        except (KeyError, TypeError, ValueError):
+            raise exs.InvalidAlphabetError(
+                self.alphabet_path,
+                ["meta.rows", "meta.cols (целые числа)"],
+            )
+        if self.rows < 1 or self.cols < 1:
+            raise exs.ActionError(
+                f"Некорректные размеры таблицы: {self.rows}x{self.cols}"
+            )
+
+        # --- заполнитель ---
+        filler = meta.get("filler", "X")
+        if not isinstance(filler, str) or len(filler) != 1:
+            raise exs.ActionError(
+                f"meta.filler должен быть одним символом, получено: {filler!r}"
+            )
+        if filler.upper() not in letters.upper():
+            raise exs.ActionError(
+                f"Символ-заполнитель {filler!r} отсутствует в алфавите"
+            )
+        self._filler = filler.upper()
+
+        # --- заменяемые буквы (aliases) ---
+        aliases = meta.get("aliases") or {}
+        if not isinstance(aliases, dict):
+            raise exs.InvalidAlphabetError(
+                self.alphabet_path,
+                ["meta.aliases (должен быть объектом)"],
+            )
+
+        letters_upper = letters.upper()
+        self._aliases: dict[str, str] = {}
+        for src, dst in aliases.items():
+            if not isinstance(src, str) or len(src) != 1:
+                raise exs.ActionError(
+                    f"meta.aliases: ключ должен быть одним символом, получено: {src!r}"
+                )
+            if not isinstance(dst, str) or len(dst) != 1:
+                raise exs.ActionError(
+                    f"meta.aliases: значение для {src!r} должно быть одним символом, "
+                    f"получено: {dst!r}"
+                )
+            src_u, dst_u = src.upper(), dst.upper()
+            if src_u in letters_upper:
+                raise exs.ActionError(
+                    f"meta.aliases: символ {src!r} уже есть в алфавите — "
+                    f"замена не имеет смысла"
+                )
+            if dst_u not in letters_upper:
+                raise exs.ActionError(
+                    f"meta.aliases: целевой символ {dst!r} отсутствует в алфавите"
+                )
+            if src_u in self._aliases:
+                raise exs.ActionError(
+                    f"meta.aliases: дублирующийся ключ {src!r}"
+                )
+            self._aliases[src_u] = dst_u
+
+        # защита от циклов
+        for src in self._aliases:
+            seen = {src}
+            cur = self._aliases[src]
+            while cur in self._aliases:
+                if cur in seen:
+                    raise exs.ActionError(
+                        f"meta.aliases: циклическая замена вокруг {src!r}"
+                    )
+                seen.add(cur)
+                cur = self._aliases[cur]
+
+        # --- карта символ -> индекс (по алфавиту) ---
+        # В таблицу попадают ВСЕ буквы из "letters", включая те,
+        # что могут быть источниками aliases (например, если кто-то
+        # оставит J в letters и добавит aliases J->I).
+        self._char_to_idx: dict[str, int] = {
+            ch.upper(): i for i, ch in enumerate(letters)
+        }
+        self._idx_to_char: list[str] = [ch.upper() for ch in letters]
+
+        # --- эффективный размер таблицы с учётом aliases ---
+        # Ячейки таблицы — это буквы алфавита, КРОМЕ тех, что
+        # являются источниками замен (они не занимают ячейку).
+        cell_chars = [
+            ch for ch in self._idx_to_char
+            if ch not in self._aliases
+        ]
+        n_cells = len(cell_chars)
+
+        if self.rows * self.cols != n_cells:
+            raise exs.ActionError(
+                f"Размер таблицы {self.rows}x{self.cols} = {self.rows * self.cols} "
+                f"не совпадает с числом уникальных ячеек алфавита "
+                f"({n_cells} после применения aliases; в letters {self._n})"
+            )
+
+        # --- построение таблицы по ключу ---
+        if not key:
+            raise exs.ActionError("Ключ шифра Плейфера не может быть пустым")
+
+        self.key = key
+        self._table: list[list[str]] = []
+        self._pos: dict[str, tuple[int, int]] = {}
+        self._build_table(key)
+
+        # нормализованный вход
+        self._norm = self._normalize(self.inp)
+
+    # --------------------------------------------------------
+    #   Построение таблицы
+    # --------------------------------------------------------
+
+    def _build_table(self, key: str) -> None:
+        seen: set[str] = set()
+        ordered: list[str] = []
+
+        # 1) уникальные символы ключа (с применением aliases)
+        for ch in key.upper():
+            while ch in self._aliases:
+                ch = self._aliases[ch]
+            if ch in self._char_to_idx and ch not in self._aliases \
+                    and ch not in seen:
+                seen.add(ch)
+                ordered.append(ch)
+
+        # 2) оставшиеся ячейки алфавита (без источников aliases)
+        for ch in self._idx_to_char:
+            if ch in self._aliases:
+                continue
+            if ch not in seen:
+                seen.add(ch)
+                ordered.append(ch)
+
+        expected = self.rows * self.cols
+        if len(ordered) != expected:
+            raise exs.ActionError(
+                f"Не удалось заполнить таблицу {self.rows}x{self.cols}: "
+                f"получено {len(ordered)} символов (ожидалось {expected})"
+            )
+
+        self._table = [
+            ordered[r * self.cols : (r + 1) * self.cols]
+            for r in range(self.rows)
+        ]
+
+        self._pos = {}
+        for r in range(self.rows):
+            for c in range(self.cols):
+                self._pos[self._table[r][c]] = (r, c)
+
+    # --------------------------------------------------------
+    #   Нормализация входа
+    # --------------------------------------------------------
+
+    def _normalize(self, text: str) -> str:
+        """
+        Приводит текст к верхнему регистру, применяет замены
+        (meta.aliases, например J -> I) и оставляет только символы
+        алфавита. Пробелы и посторонние символы удаляются.
+        """
+        result: list[str] = []
+        for ch in text.upper():
+            # 1) замена по aliases (с разрешением цепочек)
+            while ch in self._aliases:
+                ch = self._aliases[ch]
+            # 2) фильтр по алфавиту
+            if ch in self._char_to_idx:
+                result.append(ch)
+            # иначе — молча игнорируем
+        return "".join(result)
+
+    # --------------------------------------------------------
+    #   Разбиение на биграммы
+    # --------------------------------------------------------
+
+    def _split_bigrams(self, text: str) -> list[tuple[str, str]]:
+        """
+        Разбивает нормализованный текст на биграммы по правилам
+        Плейфера:
+            - две одинаковые буквы в паре -> между ними filler;
+            - нечётная длина -> в конец filler.
+        """
+        bigrams: list[tuple[str, str]] = []
+        i = 0
+        n = len(text)
+
+        while i < n:
+            a = text[i]
+            if i + 1 < n:
+                b = text[i + 1]
+                if a == b:
+                    if a == self._filler:
+                        raise exs.ActionError(
+                            f"Невозможно разбить биграмму: две подряд {a!r} "
+                            f"совпадают с filler — выберите другой filler или "
+                            f"другую замену"
+                        )
+                    bigrams.append((a, self._filler))
+                    i += 1
+                else:
+                    bigrams.append((a, b))
+                    i += 2
+            else:
+                bigrams.append((a, self._filler))
+                i += 1
+
+        return bigrams
+
+    # --------------------------------------------------------
+    #   Преобразование одной биграммы
+    # --------------------------------------------------------
+
+    def _transform_bigram(
+        self, a: str, b: str, sign: int
+    ) -> tuple[str, str]:
+        """
+        Преобразует биграмму (a, b) по правилам Плейфера.
+
+        sign = +1 — шифрование (code):
+            * одна строка   -> сдвиг вправо;
+            * один столбец  -> сдвиг вниз;
+            * прямоугольник -> столбец партнёра.
+        sign = -1 — расшифровка (encode):
+            * одна строка   -> сдвиг влево;
+            * один столбец  -> сдвиг вверх;
+            * прямоугольник -> столбец партнёра (симметрично).
+        """
+        ra, ca = self._pos[a]
+        rb, cb = self._pos[b]
+
+        if ra == rb:
+            # одна строка — сдвиг по столбцам
+            new_ca = (ca + sign) % self.cols
+            new_cb = (cb + sign) % self.cols
+            return self._table[ra][new_ca], self._table[rb][new_cb]
+
+        if ca == cb:
+            # один столбец — сдвиг по строкам
+            new_ra = (ra + sign) % self.rows
+            new_rb = (rb + sign) % self.rows
+            return self._table[new_ra][ca], self._table[new_rb][cb]
+
+        # прямоугольник — меняем столбцы
+        return self._table[ra][cb], self._table[rb][ca]
+
+    # --------------------------------------------------------
+    #   Публичные методы
+    # --------------------------------------------------------
+
+    def code(self) -> str:
+        """Шифрование: биграммы -> преобразованные биграммы."""
+        self._reset_output()
+
+        bigrams = self._split_bigrams(self._norm)
+        result: list[str] = []
+        for a, b in bigrams:
+            na, nb = self._transform_bigram(a, b, +1)
+            result.append(na)
+            result.append(nb)
+
+        out = "".join(result)
+        self.out = [out]
+        return out
+
+    def encode(self) -> str:
+        """
+        Расшифровка.
+
+        ВАЖНО: для корректной расшифровки вход должен быть
+        результатом code() — то есть нормализованным (без пробелов)
+        и с filler'ами на местах. Метод не удаляет filler'ы
+        автоматически, так как они могут быть легитимными буквами
+        исходного текста.
+        """
+        self._reset_output()
+
+        bigrams = self._split_bigrams(self._norm)
+        result: list[str] = []
+        for a, b in bigrams:
+            na, nb = self._transform_bigram(a, b, -1)
+            result.append(na)
+            result.append(nb)
 
         out = "".join(result)
         self.out = [out]

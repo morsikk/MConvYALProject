@@ -30,16 +30,17 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QRadioButton,
     QSlider,
-    QSizePolicy
+    QSizePolicy,
+    QGridLayout,
 )
 from PyQt6.QtCore import QSize, Qt, pyqtSignal, QUrl
 from PyQt6.QtGui import QFont, QPalette, QColor
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 
-
 # ============================================================
 #   ТЕМА: определение, палитры, QSS
 # ============================================================
+
 
 def detect_theme() -> str:
     """
@@ -78,54 +79,48 @@ DARK_PALETTE = {
     # Иконки стрелок (для тёмной темы используются СВЕТЛЫЕ иконки)
     "up_arrow": "svg/arrow_up_light.svg",
     "down_arrow": "svg/arrow_down_light.svg",
-
     # Иконки радиокнопок для тёмной темы
-    "radio_off":       "svg/radio_off_dark.svg",
+    "radio_off": "svg/radio_off_dark.svg",
     "radio_off_hover": "svg/radio_off_hover_dark.svg",
-    "radio_on":        "svg/radio_on_dark.svg",
-    "radio_on_hover":  "svg/radio_on_hover_dark.svg",
-
+    "radio_on": "svg/radio_on_dark.svg",
+    "radio_on_hover": "svg/radio_on_hover_dark.svg",
     # Иконки кнопок плеера
     "play": "svg/play_light.svg",
     "pause": "svg/pause_light.svg",
-
     # Основные цвета
-    "bg": "#1e1e1e",              # общий фон окна
-    "panel": "#252526",           # фон панелей
-    "fg": "#e0e0e0",              # основной цвет текста
-    "accent": "#0e639c",          # акцентный цвет (кнопки, фокус)
-    "accent_fg": "#ffffff",       # текст на акцентном фоне
-    "input_bg": "#1b1b1c",        # фон полей ввода
-    "input_border": "#3c3c3c",    # рамка полей ввода
-    "button_bg": "#2d2d30",       # фон кнопок
-    "button_border": "#3c3c3c",   # рамка кнопок
-    "button_hover": "#3a3a3d",    # фон кнопок при наведении
-    "sel_bg": "#264f78",          # фон выделения текста
-    "sel_fg": "#ffffff",          # цвет текста в выделении
-    "panel_border": "#3c3c3c",    # рамка панелей
-    "fg_muted": "#9a9a9a",        # приглушённый текст
-    "header_bg": "#252526",       # фон заголовков панелей
-    "header_border": "#3c3c3c",   # рамка заголовков панелей
-    "scrollbar": "#3c3c3c",       # ползунок скроллбара
-    "scrollbar_hover": "#4a4a4a", # ползунок при наведении
-    "accent_hover": "#1177bb",    # акцент при наведении
+    "bg": "#1e1e1e",  # общий фон окна
+    "panel": "#252526",  # фон панелей
+    "fg": "#e0e0e0",  # основной цвет текста
+    "accent": "#0e639c",  # акцентный цвет (кнопки, фокус)
+    "accent_fg": "#ffffff",  # текст на акцентном фоне
+    "input_bg": "#1b1b1c",  # фон полей ввода
+    "input_border": "#3c3c3c",  # рамка полей ввода
+    "button_bg": "#2d2d30",  # фон кнопок
+    "button_border": "#3c3c3c",  # рамка кнопок
+    "button_hover": "#3a3a3d",  # фон кнопок при наведении
+    "sel_bg": "#264f78",  # фон выделения текста
+    "sel_fg": "#ffffff",  # цвет текста в выделении
+    "panel_border": "#3c3c3c",  # рамка панелей
+    "fg_muted": "#9a9a9a",  # приглушённый текст
+    "header_bg": "#252526",  # фон заголовков панелей
+    "header_border": "#3c3c3c",  # рамка заголовков панелей
+    "scrollbar": "#3c3c3c",  # ползунок скроллбара
+    "scrollbar_hover": "#4a4a4a",  # ползунок при наведении
+    "accent_hover": "#1177bb",  # акцент при наведении
 }
 
 LIGHT_PALETTE = {
     # Для светлой темы — тёмные иконки стрелок
     "up_arrow": "svg/arrow_up_dark.svg",
     "down_arrow": "svg/arrow_down_dark.svg",
-
     # Иконки радиокнопок для светлой темы
-    "radio_off":       "svg/radio_off_light.svg",
+    "radio_off": "svg/radio_off_light.svg",
     "radio_off_hover": "svg/radio_off_hover_light.svg",
-    "radio_on":        "svg/radio_on_light.svg",
-    "radio_on_hover":  "svg/radio_on_hover_light.svg",
-
+    "radio_on": "svg/radio_on_light.svg",
+    "radio_on_hover": "svg/radio_on_hover_light.svg",
     # Иконки кнопок плеера
     "play": "svg/play_dark.svg",
     "pause": "svg/pause_dark.svg",
-
     "bg": "#ffffff",
     "panel": "#f5f5f7",
     "fg": "#1a1a1a",
@@ -469,6 +464,7 @@ def build_app_qss(p: dict) -> str:
 #   OperationForm — форма параметров операции
 # ============================================================
 
+
 class OperationForm(QWidget):
     """
     Форма с параметрами одной операции.
@@ -499,14 +495,14 @@ class OperationForm(QWidget):
         )
 
         # --- Создание виджетов ---
-        self.typeCombo = QComboBox()                 # тип операции
-        self.operCombo = QComboBox()                 # конкретная операция (для шифров)
-        self.inpSpin = QSpinBox()                    # основание вводимой системы счисления
+        self.typeCombo = QComboBox()  # тип операции
+        self.operCombo = QComboBox()  # конкретная операция (для шифров)
+        self.inpSpin = QSpinBox()  # основание вводимой системы счисления
         self.inpSpin.setRange(2, 36)
-        self.operSpin = QSpinBox()                   # основание выводимой системы счисления
+        self.operSpin = QSpinBox()  # основание выводимой системы счисления
         self.operSpin.setRange(2, 36)
-        self.alphabetCombo = QComboBox()             # выбор алфавита
-        self.keyEdit = QLineEdit()                   # ключ шифра
+        self.alphabetCombo = QComboBox()  # выбор алфавита
+        self.keyEdit = QLineEdit()  # ключ шифра
         self.keyEdit.setPlaceholderText("Ключ...")
 
         # --- Направление: кодировать / декодировать ---
@@ -520,7 +516,7 @@ class OperationForm(QWidget):
 
         # Контейнер для направления, чтобы строку можно было скрывать
         self.directionWidget = QWidget()
-        self.directionWidget.setObjectName('directionWidget')
+        self.directionWidget.setObjectName("directionWidget")
         self.directionWidget.setLayout(self.directionLayout)
         self.directionLayout.setContentsMargins(0, 0, 0, 0)
 
@@ -596,6 +592,7 @@ class OperationForm(QWidget):
 # ============================================================
 #   Ui_MainWindow — сборка главного окна
 # ============================================================
+
 
 class Ui_MainWindow(object):
     """
@@ -767,6 +764,7 @@ class Ui_MainWindow(object):
 #   ActionWidget — карточка одного действия
 # ============================================================
 
+
 class ActionWidget(QWidget):
     """
     Виджет одного действия в списке.
@@ -781,8 +779,8 @@ class ActionWidget(QWidget):
     """
 
     removed = pyqtSignal(object)  # испускается при удалении (передаёт self)
-    move_up = pyqtSignal(object)   # запрос переместить вверх (передаёт self)
-    move_down = pyqtSignal(object) # запрос переместить вниз  (передаёт self)
+    move_up = pyqtSignal(object)  # запрос переместить вверх (передаёт self)
+    move_down = pyqtSignal(object)  # запрос переместить вниз  (передаёт self)
 
     def __init__(self) -> None:
         super().__init__()
@@ -803,15 +801,11 @@ class ActionWidget(QWidget):
         self.upButton = QPushButton()
         self.upButton.setObjectName("upButton")
         self.upButton.setToolTip("Переместить вверх")
-        self.upButton.clicked.connect(
-            lambda: self.move_up.emit(self)
-        )      
+        self.upButton.clicked.connect(lambda: self.move_up.emit(self))
         self.downButton = QPushButton()
         self.downButton.setObjectName("downButton")
         self.downButton.setToolTip("Переместить вниз")
-        self.downButton.clicked.connect(
-            lambda: self.move_down.emit(self)
-        )   
+        self.downButton.clicked.connect(lambda: self.move_down.emit(self))
         self.delButton = QPushButton()
         self.delButton.setObjectName("delButton")
         self.delButton.setText("-")
@@ -835,7 +829,9 @@ class ActionWidget(QWidget):
         )
         self.mFLayout.typeCombo.currentIndexChanged.connect(self.on_type_changed)
         self.mFLayout.typeCombo.setCurrentIndex(0)
-        self.on_type_changed(0)  # ручной вызов, т.к. сигнал не сработает, если индекс уже 0
+        self.on_type_changed(
+            0
+        )  # ручной вызов, т.к. сигнал не сработает, если индекс уже 0
 
         self.mFLayout.typeCombo.currentIndexChanged.connect(self.on_type_changed)
         self.mFLayout.typeCombo.setCurrentIndex(0)
@@ -844,7 +840,9 @@ class ActionWidget(QWidget):
         self.mFLayout.operCombo.currentIndexChanged.connect(self.on_cipher_changed)
         self.on_cipher_changed(self.mFLayout.operCombo.currentIndex())
 
-        self.mFLayout.alphabetCombo.currentIndexChanged.connect(self.on_alphabet_changed)
+        self.mFLayout.alphabetCombo.currentIndexChanged.connect(
+            self.on_alphabet_changed
+        )
 
     def on_alphabet_changed(self, index: int) -> None:
         """
@@ -915,7 +913,7 @@ class ActionWidget(QWidget):
                 for meta in alps["braille"].values():
                     f.alphabetCombo.addItem(meta["name"], meta["data"])
 
-            case 4: # Бинарный код — кодировка + направление
+            case 4:  # Бинарный код — кодировка + направление
                 f.show_only("alphabetCombo", "direction")
                 f.alphabetCombo.clear()
                 for meta in alps["binary"].values():
@@ -944,30 +942,67 @@ class ActionWidget(QWidget):
         if f.typeCombo.currentIndex() != 2:
             return
 
-        if index == 0:  # Цезарь
-            # прячем ключ
-            f.hide_row("keyEdit")
+        match index:
+            case 0:  # Цезарь
+                # прячем ключ
+                f.hide_row("keyEdit")
 
-            # заполняем алфавит доступными для Цезаря
-            f.alphabetCombo.clear()
-            with open("alphabets/alphabets.json", "r", encoding="utf-8") as alps_j:
-                alps = json.load(alps_j)
-            for meta in alps["ciphers"]["caesar"]["alps"].values():
-                f.alphabetCombo.addItem(meta["name"], meta["data"])
+                # заполняем алфавит доступными для Цезаря
+                f.alphabetCombo.clear()
+                with open("alphabets/alphabets.json", "r", encoding="utf-8") as alps_j:
+                    alps = json.load(alps_j)
+                for meta in alps["ciphers"]["caesar"]["alps"].values():
+                    f.alphabetCombo.addItem(meta["name"], meta["data"])
 
-            # подпись «Сдвиг»
-            label, _ = f._rows["operSpin"]
-            if label is not None:
-                label.setText("Сдвиг:")
+                # подпись «Сдвиг»
+                label, _ = f._rows["operSpin"]
+                if label is not None:
+                    label.setText("Сдвиг:")
 
-            # ограничения — по длине алфавита
-            self._update_caesar_spin_range()
+                # ограничения — по длине алфавита
+                self._update_caesar_spin_range()
 
-            f.show_row("operSpin")
-        else:
-            # обычный шифр — ключ нужен, сдвиг не нужен
-            f.show_row("keyEdit")
-            f.hide_row("operSpin")
+                f.show_row("operSpin")
+
+            case 1:  # Виженёр
+                f.show_row("keyEdit")
+                f.hide_row("operSpin")
+                f.alphabetCombo.clear()
+
+                with open("alphabets/alphabets.json", "r", encoding="utf-8") as alps_j:
+                    alps = json.load(alps_j)
+                for meta in alps["ciphers"]["vigenere"]["alps"].values():
+                    f.alphabetCombo.addItem(meta["name"], meta["data"])
+
+            case 2:  # A1Z26
+                f.hide_row("keyEdit")
+                f.hide_row("operSpin")
+                f.alphabetCombo.clear()
+
+                with open("alphabets/alphabets.json", "r", encoding="utf-8") as alps_j:
+                    alps = json.load(alps_j)
+                for meta in alps["ciphers"]["A1Z26"]["alps"].values():
+                    f.alphabetCombo.addItem(meta["name"], meta["data"])
+
+            case 3:  # Атбаш
+                f.hide_row("keyEdit")
+                f.hide_row("operSpin")
+                f.alphabetCombo.clear()
+
+                with open("alphabets/alphabets.json", "r", encoding="utf-8") as alps_j:
+                    alps = json.load(alps_j)
+                for meta in alps["ciphers"]["atbash"]["alps"].values():
+                    f.alphabetCombo.addItem(meta["name"], meta["data"])
+
+            case 4:  # Плейфер
+                f.show_row("keyEdit")
+                f.hide_row("operSpin")
+                f.alphabetCombo.clear()
+
+                with open("alphabets/alphabets.json", "r", encoding="utf-8") as alps_j:
+                    alps = json.load(alps_j)
+                for meta in alps["ciphers"]["playfair"]["alps"].values():
+                    f.alphabetCombo.addItem(meta["name"], meta["data"])
 
     def _update_caesar_spin_range(self) -> None:
         """
@@ -977,11 +1012,13 @@ class ActionWidget(QWidget):
         в currentData() для Цезаря лежит только код ("ru"/"en").
         """
         f = self.mFLayout
-        code = f.alphabetCombo.currentData()          # "ru" / "en"
-        n = 33                                        # запасное значение по умолчанию
+        code = f.alphabetCombo.currentData()  # "ru" / "en"
+        n = 33  # запасное значение по умолчанию
         if code:
             try:
-                with open(f"alphabets/ciphers/caesar/{code}.json", "r", encoding="utf-8") as fp:
+                with open(
+                    f"alphabets/ciphers/caesar/{code}.json", "r", encoding="utf-8"
+                ) as fp:
                     data = json.load(fp)
                 letters = data.get("letters", "")
                 if letters:
@@ -1020,6 +1057,7 @@ class ActionWidget(QWidget):
 # ============================================================
 #   Настройки: страница, диалог
 # ============================================================
+
 
 class Page(QWidget):
     """
@@ -1191,6 +1229,7 @@ class SettingsDialog(QDialog):
 
 class SquareButton(QPushButton):
     """Кнопка, которая всегда квадратная, но тянется по высоте родителя."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
@@ -1237,7 +1276,9 @@ class MiniPlayer(QWidget):
 
         self.slider = QSlider(Qt.Orientation.Horizontal)
         self.slider.setObjectName("playerSlider")
-        self.slider.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.slider.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
         self.slider.setRange(0, 0)
 
         lay.addWidget(self.btn_play, 0)
@@ -1263,9 +1304,10 @@ class MiniPlayer(QWidget):
 
     def reload_source(self, path: str = "temp_morse.wav"):
         from pathlib import Path
+
         self.player.stop()
-        self.player.setSource(QUrl())        # сброс старого
-        self.slider.setRange(0, 0)           # чтобы не остался максимум от прошлого файла
+        self.player.setSource(QUrl())  # сброс старого
+        self.slider.setRange(0, 0)  # чтобы не остался максимум от прошлого файла
         self.slider.setValue(0)
         if Path(path).exists():
             self.player.setSource(QUrl.fromLocalFile(path))
@@ -1273,6 +1315,42 @@ class MiniPlayer(QWidget):
     def on_media_status(self, status):
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
             self.pause()
+
+
+# ============================================================
+#   Диалог для ввода Брайля
+# ============================================================
+
+
+class BrailleDialog(QDialog):
+    def __init__(self, /, parent=...):
+        super().__init__(parent)
+        self.setWindowTitle("Ввод Брайля")
+        self.mHBoxLayout = QHBoxLayout(self)
+        self.rightGLayout = QGridLayout(self.mHBoxLayout)
+        self.brailleOut = QPlainTextEdit(self.mHBoxLayout)
+        self.brailleOut.setReadOnly(True)
+
+        self.pressed = [False] * 6
+
+        for i in range(6):
+            btn = QPushButton()
+            btn.setCheckable(True)
+            btn.setFixedSize(50, 50)
+            btn.setObjectName(f"dot_{i}")
+            btn.toggled.connect(self.on_dot_toggled)
+            self.mHBoxLayout.addWidget(btn, i // 3, i % 3)
+
+    def on_dot_toggled(self, checked):
+        btn: QPushButton = self.sender()
+        idx = int(btn.objectName().split("_")[1])
+        self.pressed[idx] = checked
+        if checked:
+            btn.setText("•")
+            return
+        btn.setText("")
+
+
 # ============================================================
 #   Точка входа
 # ============================================================
