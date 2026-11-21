@@ -17,6 +17,10 @@ class ActionError(Exception):
         self.message = message
 
 
+class CardCancelled(Exception):
+    """Пользователь отменил операцию в диалоге политики."""
+
+
 class UnknownSymbolError(ActionError):
     """
     Символ отсутствует в выбранном алфавите.

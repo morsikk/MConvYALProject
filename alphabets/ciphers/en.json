@@ -2,12 +2,14 @@
     "meta": {
         "name": "Английский",
         "data": "en",
+        "sep": "-",
+        "shift": 3,
         "rows": 5,
         "cols": 5,
-        "filler": "X",
+        "filler": "x",
         "aliases": {
-            "J": "I"
+            "j": "i"
         }
     },
-    "letters": "ABCDEFGHIKLMNOPQRSTUVWXYZ"
+    "letters": "abcdefghijklmnopqrstuvwxyz"
 }

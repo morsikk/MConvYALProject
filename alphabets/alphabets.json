@@ -12,72 +12,32 @@
     "ciphers": {
         "caesar": {
             "name": "Шифр Цезаря",
-            "data": "caesar",
-            "alps": {
-                "ru": {
-                    "name": "Русский",
-                    "data": "ru"
-                },
-                "en": {
-                    "name": "Английский",
-                    "data": "en"
-                }
-            }
+            "data": "caesar"
         },
         "vigenere": {
             "name": "Шифр Виженёра",
-            "data": "vigenere",
-            "alps": {
-                "ru": {
-                    "name": "Русский",
-                    "data": "ru"
-                },
-                "en": {
-                    "name": "Английский",
-                    "data": "en"
-                }
-            }
+            "data": "vigenere"
         },
         "A1Z26": {
             "name": "Шифр A1Z26",
-            "data": "A1Z26",
-            "alps": {
-                "ru": {
-                    "name": "Русский",
-                    "data": "ru"
-                },
-                "en": {
-                    "name": "Английский",
-                    "data": "en"
-                }
-            }
+            "data": "A1Z26"
         },
         "atbash": {
             "name": "Шифр Атбаш",
-            "data": "atbash",
-            "alps": {
-                "ru": {
-                    "name": "Русский",
-                    "data": "ru"
-                },
-                "en": {
-                    "name": "Английский",
-                    "data": "en"
-                }
-            }
+            "data": "atbash"
         },
         "playfair": {
             "name": "Шифр Плейфера",
-            "data": "playfair",
-            "alps": {
-                "ru": {
-                    "name": "Русский",
-                    "data": "ru"
-                },
-                "en": {
-                    "name": "Английский",
-                    "data": "en"
-                }
+            "data": "playfair"
+        },
+        "alps": {
+            "ru": {
+                "name": "Русский",
+                "data": "ru"
+            },
+            "en": {
+                "name": "Английский",
+                "data": "en"
             }
         }
     },
