@@ -9,6 +9,8 @@ import wave
 from functools import partial
 from pathlib import Path
 from shutil import copy2
+from Paths import data_path
+import json
 
 from PyQt6.QtWidgets import (
     QApplication,
@@ -25,8 +27,10 @@ from ConverterWidgets import (
     Ui_MainWindow,
     ActionWidget,
     OperationForm,
-    BrailleDialog,
+    BrailleWindow,
     SettingsDialog,
+    CipherAlphabetDialog,
+    NumeralAlphabetDialog,
     get_palette,
     build_app_palette,
     build_app_qss,
@@ -37,6 +41,7 @@ from ConverterWidgets import (
     SETTINGS
 )
 from Actions import (
+    AlphabetAction,
     Morse,
     NumberSystem,
     Braille,
@@ -49,17 +54,12 @@ from Actions import (
 )
 from Exceptions import (  # noqa: F401
     ActionError,
-    CardCancelled,
-    UnknownSymbolError,
-    MissingSpaceSymbolError,
-    InvalidAlphabetError,
-    MissingSpacerError,
+    UnknownSymbolPolicyError
 )
 
 from Settings import (
     SETTINGS,
     UnknownPolicy,
-    UnknownSymbolPolicyError,
     POLICY_IGNORE,
     POLICY_REPLACE,
     POLICY_WARN,
@@ -107,6 +107,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self._base_formats = ["Text Files (*.txt)", "All Files (*)"]
         self._audio_formats = ["MP3 Files (*.mp3)", "WAV Files (*.wav)"]
         self.saveFormats = list(self._base_formats)
+        self.braille_window = None
 
     # --------------------------------------------------------
     #   Список действий
@@ -254,13 +255,74 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.morsePlayerAction.triggered.connect(self.open_morse_player)
         self.brailleInputAction.triggered.connect(self.open_braille_input)
 
+        # «Создать алфавит...» — подменю
+        self.makeBrailleAction.triggered.connect(
+            lambda: self.open_alphabet_dialog(BrailleAlphabetDialog)
+        )
+        self.makeMorseAction.triggered.connect(
+            lambda: self.open_alphabet_dialog(
+                CipherAlphabetDialog,
+                initial={
+                    "meta": {"name": "Морзе", "data": "morse", "spacer": "пробел"},
+                    "letters": {},
+                },
+                default_filename="new_morse.json",
+            )
+        )
+        self.makeNumSysAction.triggered.connect(
+            lambda: self.open_alphabet_dialog(NumeralAlphabetDialog)
+        )
+        self.makeCiphersAction.triggered.connect(
+            lambda: self.open_alphabet_dialog(CipherAlphabetDialog)
+        )
+
+
+    def open_alphabet_dialog(
+        self,
+        dialog_cls,
+        initial: dict | None = None,
+        default_filename: str = "",
+    ) -> None:
+        """Открывает диалог создания алфавита и сохраняет результат в JSON."""
+        dlg = dialog_cls(self, initial=initial, default_filename=default_filename)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        data = dlg.result_data()
+        fname = dlg.result_filename()
+        if not data or not fname:
+            return
+
+        # Диалоги создают пользовательские алфавиты — кладём их в
+        # data_path("alphabets/..."), а не в ресурсы (ресурсы могут быть read-only).
+        subdir = {
+            "braille": "alphabets/braille",
+            "cipher": "alphabets/ciphers",
+            "numeral": "alphabets/number_systems",
+        }.get(getattr(dialog_cls, "alphabet_type", ""), "alphabets")
+
+        target_dir = Path(data_path(subdir))
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / fname
+
+        try:
+            with open(target, "w", encoding="utf-8") as fp:
+                json.dump(data, fp, ensure_ascii=False, indent=2)
+        except OSError as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить файл:\n{e}")
+            return
+
+        self.statusbar.showMessage(f"Алфавит сохранён: {target}", 5000)
+
     def open_braille_input(self) -> None:
-        dialog = BrailleDialog(self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            braille_text = dialog.brailleOut.toPlainText()
-            if braille_text:
-                current = self.inpText.toPlainText()
-                self.inpText.setPlainText(current + braille_text)
+        if self.braille_window is None:
+            self.braille_window = BrailleWindow(
+                target_widget=self.inpText, parent=self
+            )
+        self.braille_window.show()
+        self.braille_window.raise_()
+        self.braille_window.activateWindow()
+        
 
     def _on_color_scheme_changed(self, scheme) -> None:
         if SETTINGS.get("theme", DEFAULT_SETTINGS["theme"]) != "Системная":
@@ -336,19 +398,18 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.tBarWidget.show()
 
     def _alphabet_path_for(self, f: OperationForm, type_ind: int) -> str:
-        """Путь к JSON-алфавиту для текущей карточки (для сообщений)."""
         match type_ind:
             case 0:
                 return resource_path(
-                    f"alphabets/morse/{f.alphabetCombo.currentData()}.json"
+                    f"alphabets/morse/{f.alphabetCombo.currentData()}"
                 )
             case 2:
                 return resource_path(
-                    f"alphabets/ciphers/{f.alphabetCombo.currentData()}.json"
+                    f"alphabets/ciphers/{f.alphabetCombo.currentData()}"
                 )
             case 3:
                 return resource_path(
-                    f"alphabets/braille/{f.alphabetCombo.currentData()}.json"
+                    f"alphabets/braille/{f.alphabetCombo.currentData()}"
                 )
             case _:
                 return ""
@@ -395,6 +456,19 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             )
             return []
 
+    @staticmethod
+    def _alphabet_display_name(alphabet_path: str) -> str:
+        if not alphabet_path:
+            return "—"
+        try:
+            with open(alphabet_path, encoding="utf-8") as fh:
+                meta = json.load(fh).get("meta") or {}
+            name = meta.get("name")
+            if name:
+                return str(name)
+        except (OSError, ValueError):
+            pass
+        return Path(alphabet_path).name
 
     def _ask_unknown_policy(
         self,
@@ -403,13 +477,14 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     ) -> UnknownPolicy | None:
         sample = "".join(unknown[:10])
         more = f" и ещё {len(unknown) - 10}" if len(unknown) > 10 else ""
+        display = self._alphabet_display_name(alphabet_path)
 
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Warning)
         box.setWindowTitle("Неизвестные символы")
         box.setText(
             f"В тексте есть символы, отсутствующие в алфавите "
-            f"«{alphabet_path}»:\n{sample}{more}"
+            f"«{display}»:\n{sample}{more}"
         )
         btn_abort = box.addButton("До первой ошибки", QMessageBox.ButtonRole.AcceptRole)
         btn_ignore = box.addButton("Игнорировать", QMessageBox.ButtonRole.ActionRole)
@@ -439,6 +514,224 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         return UnknownPolicy(mode=POLICY_WARN)
 
     # --------------------------------------------------------
+    #   Хелперы выполнения цепочки
+    # --------------------------------------------------------
+
+    def _probe_unknown(
+        self,
+        type_ind: int,
+        f: OperationForm,
+        text: str,
+        alphabet_path: str,
+        policy: UnknownPolicy,
+    ) -> list[str]:
+        # Направление берём из карточки: codeRadio отмечен -> code(), иначе encode().
+        direction = "code" if f.codeRadio.isChecked() else "encode"
+
+        try:
+            match type_ind:
+                case 0:
+                    obj = Morse(alphabet_path, text, policy=policy)
+                case 2:
+                    params = dict(
+                        alphabet=alphabet_path,
+                        inp=text,
+                        shift=f.operSpin.value(),
+                        key=f.keyEdit.text(),
+                        policy=policy,
+                    )
+                    idx = f.operCombo.currentIndex()
+                    if not (0 <= idx < len(self.CIPHERS)):
+                        return []
+                    obj = self.CIPHERS[idx](**params)
+                case 3:
+                    obj = Braille(alphabet_path, text, policy=policy)
+                case _:
+                    return []
+
+            # AlphabetAction понимает направление; прочие — нет.
+            if isinstance(obj, AlphabetAction):
+                obj.set_direction(direction)
+
+            return obj._check_unknown_chars()
+        except UnknownSymbolPolicyError:
+            # Это и есть «неизвестный символ» — пробрасываем наверх,
+            # execute() покажет диалог через _handle_unknown_policy_error.
+            raise
+        except ActionError as e:
+            # Конструктор упал по другой причине (неверный ключ, битый алфавит
+            # и т.п.) — не маскируем это под «неизвестные символы».
+            # Возвращаем пустой список: реальная ошибка всплывёт в _run_action,
+            # где будет показана корректным диалогом.
+            return []
+
+    def _resolve_policy(
+        self,
+        type_ind: int,
+        f: OperationForm,
+        text: str,
+        base_policy: UnknownPolicy,
+        card_policy: UnknownPolicy | None,
+    ) -> tuple[UnknownPolicy, UnknownPolicy | None, bool]:
+        if card_policy is not None:
+            return card_policy, card_policy, False
+
+        if base_policy.mode != POLICY_WARN or type_ind not in (0, 2, 3):
+            return base_policy, card_policy, False
+
+        alphabet_path = self._alphabet_path_for(f, type_ind)
+        try:
+            unknown = self._probe_unknown(type_ind, f, text, alphabet_path, base_policy)
+        except UnknownSymbolPolicyError as e:
+            chosen = self._ask_unknown_policy([e.symbol], alphabet_path)
+            if chosen is None:
+                return base_policy, card_policy, True
+            return chosen, chosen, False
+
+        if not unknown:
+            return base_policy, card_policy, False
+
+        chosen = self._ask_unknown_policy(unknown, alphabet_path)
+        if chosen is None:
+            return base_policy, card_policy, True
+        return chosen, chosen, False
+
+    def _handle_unknown_policy_error(
+        self,
+        exc: UnknownSymbolPolicyError,
+        type_ind: int,
+        f: OperationForm,
+        base_policy: UnknownPolicy,
+        card_policy: UnknownPolicy | None,
+    ) -> tuple[UnknownPolicy, UnknownPolicy | None, bool, bool]:
+        """
+        Реакция на UnknownSymbolPolicyError.
+
+        Возвращает (base_policy, card_policy, retry, cancelled).
+        """
+        if card_policy is not None:
+            # Пользователь уже выбрал политику для этой карточки —
+            # повторно не спрашиваем.
+            self._show_action_error(exc)
+            return base_policy, card_policy, False, True
+
+        alphabet_path = self._alphabet_path_for(f, type_ind)
+        chosen = self._ask_unknown_policy([exc.symbol], alphabet_path)
+        if chosen is None:
+            return base_policy, card_policy, False, True
+        if chosen.mode == POLICY_WARN:
+            self._show_action_error(exc)
+            return base_policy, card_policy, False, True
+        return chosen, chosen, True, False
+
+    def _show_partial(self, partial: str, message: str) -> str:
+        """
+        Записать в outText частичный результат (если есть) + сообщение.
+        Возвращает текст, который попал в outText.
+        """
+        text = f"{partial}\n[{message}]" if partial else message
+        self.outText.setPlainText(text)
+        return text
+
+    # --------------------------------------------------------
+    #   Показ ошибок
+    # --------------------------------------------------------
+
+    _ICONS = {
+        "critical": QMessageBox.Icon.Critical,
+        "warning": QMessageBox.Icon.Warning,
+        "info": QMessageBox.Icon.Information,
+    }
+
+    def _show_action_error(self, exc: ActionError) -> None:
+        """
+        Единая точка показа ActionError:
+        сначала partial_out в outText, потом диалог.
+        """
+        title, message, icon = exc.dialog_spec()
+        partial = getattr(exc, "partial_out", "")
+        self._show_partial(partial, message)
+
+        box = QMessageBox(self)
+        box.setIcon(self._ICONS.get(icon, QMessageBox.Icon.Critical))
+        box.setWindowTitle(title)
+        box.setText(message)
+        box.exec()
+
+    def _run_action(
+        self,
+        type_ind: int,
+        f: OperationForm,
+        text: str,
+        effective_policy: UnknownPolicy,
+    ) -> str:
+        """
+        Выполняет одно действие над текстом. Может бросить исключения —
+        их обрабатывает вызывающий код.
+        """
+        code_radio = f.codeRadio.isChecked()
+
+        match type_ind:
+            case 0:  # Морзе
+                morse = Morse(
+                    resource_path(
+                        f"alphabets/morse/{f.alphabetCombo.currentData()}"
+                    ),
+                    text,
+                    policy=effective_policy,
+                )
+                if code_radio:
+                    out = morse.code()
+                    self._morse_text = out
+                    self._morse_ready = False
+                    return out
+                self._morse_text = ""
+                self._morse_ready = False
+                return morse.encode()
+
+            case 1:  # Системы счисления
+                conv = NumberSystem(
+                    resource_path(
+                        f"alphabets/number_systems/"
+                        f"{f.alphabetCombo.currentData()}"
+                    ),
+                    f.inpSpin.value(),
+                    f.operSpin.value(),
+                    text,
+                )
+                return conv.oper()
+
+            case 2:  # Шифры
+                params = {
+                    "alphabet": resource_path(
+                        f"alphabets/ciphers/{f.alphabetCombo.currentData()}"
+                    ),
+                    "inp": text,
+                    "shift": f.operSpin.value(),
+                    "key": f.keyEdit.text(),
+                    "policy": effective_policy,
+                }
+                idx = f.operCombo.currentIndex()
+                if not (0 <= idx < len(self.CIPHERS)):
+                    raise ActionError(f"Неверный индекс шифра: {idx}")
+                cipher = self.CIPHERS[idx](**params)
+                return cipher.code() if code_radio else cipher.encode()
+
+            case 3:  # Брайль
+                braille = Braille(
+                    resource_path(
+                        f"alphabets/braille/{f.alphabetCombo.currentData()}"
+                    ),
+                    text,
+                    policy=effective_policy,
+                )
+                return braille.code() if code_radio else braille.encode()
+
+            case 4:  # Бинарный код
+                binary = Bytes(text, f.alphabetCombo.currentData())  # "utf-8" / "utf-16"
+                return binary.code() if code_radio else binary.encode()
+
+    # --------------------------------------------------------
     #   Выполнение цепочки
     # --------------------------------------------------------
 
@@ -450,7 +743,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self._reset_morse_state()
 
         base_policy = UnknownPolicy.current()
-
         has_morse = False
         error_shown = False
 
@@ -460,172 +752,38 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                 continue
 
             type_ind = f.typeCombo.currentIndex()
-            code_radio = f.codeRadio.isChecked()
+            card_policy: UnknownPolicy | None = None
 
-            while True:   # ← цикл для повтора карточки при UnknownSymbolPolicyError
-                # ---- предварительная проверка (только в режиме WARN) ----
-                if base_policy.mode == POLICY_WARN and type_ind in (0, 2, 3):
-                    alphabet_path = self._alphabet_path_for(f, type_ind)
-                    unknown = self._probe_unknown(type_ind, f, text, alphabet_path, base_policy)
-                    if unknown:
-                        chosen = self._ask_unknown_policy(unknown, alphabet_path)
-                        if chosen is None:
-                            return                      # отмена всей операции
-                        effective_policy = chosen
-                    else:
-                        effective_policy = base_policy
-                else:
-                    effective_policy = base_policy
+            while True:
+                effective_policy, card_policy, cancelled = self._resolve_policy(
+                    type_ind, f, text, base_policy, card_policy
+                )
+                if cancelled:
+                    return
 
-                retry = False
-
-                match type_ind:
-                    case 0:  # Морзе
+                try:
+                    text = self._run_action(type_ind, f, text, effective_policy)
+                    if type_ind == 0:
                         has_morse = True
-                        try:
-                            morse = Morse(
-                                resource_path(
-                                    f"alphabets/morse/{f.alphabetCombo.currentData()}.json"
-                                ),
-                                text,
-                                policy=effective_policy,
-                            )
-                            if code_radio:
-                                text = morse.code()
-                                self._morse_text = text
-                                self._morse_ready = False
-                            else:
-                                text = morse.encode()
-                                self._morse_text = ""
-                                self._morse_ready = False
-                        except UnknownSymbolPolicyError as e:
-                            alphabet_path = self._alphabet_path_for(f, type_ind)
-                            chosen = self._ask_unknown_policy([e.symbol], alphabet_path)
-                            if chosen is None:
-                                return
-                            if chosen.mode == POLICY_WARN:
-                                QMessageBox.critical(self, "Ошибка", e.message)
-                                return
-                            base_policy = chosen          # запомнить на будущее
-                            retry = True
-                        except (UnknownSymbolError, MissingSpaceSymbolError) as e:
-                            text = f"{e.partial_out}\n[{e.message}]"
-                            QMessageBox.critical(self, "Ошибка", e.message)
-                            error_shown = True
-                        except (InvalidAlphabetError, MissingSpacerError) as e:
-                            self.outText.setPlainText(e.message)
-                            QMessageBox.critical(self, "Ошибка алфавита", e.message)
-                            error_shown = True
-                        except ActionError as e:
-                            self.outText.setPlainText(e.message)
-                            QMessageBox.critical(self, "Ошибка", e.message)
-                            error_shown = True
+                except UnknownSymbolPolicyError as e:
+                    if card_policy is not None:
+                        self._show_action_error(e)
+                        return
 
-                    case 1:  # Системы счисления
-                        try:
-                            conv = NumberSystem(
-                                resource_path(
-                                    f"alphabets/number_systems/"
-                                    f"{f.alphabetCombo.currentData()}.json"
-                                ),
-                                f.inpSpin.value(),
-                                f.operSpin.value(),
-                                text,
-                            )
-                            text = conv.oper()
-                        except ActionError as e:
-                            partial_out = getattr(e, "partial_out", "")
-                            self.outText.setPlainText(
-                                f"{partial_out}\n[{e.message}]" if partial_out else e.message
-                            )
-                            QMessageBox.critical(self, "Ошибка", e.message)
-                            error_shown = True
+                    base_policy, card_policy, retry, cancelled = (
+                        self._handle_unknown_policy_error(
+                            e, type_ind, f, base_policy, card_policy
+                        )
+                    )
+                    if cancelled:
+                        return
+                    if retry:
+                        continue
+                except ActionError as e:
+                    self._show_action_error(e)
+                    error_shown = True
 
-                    case 2:  # Шифры
-                        try:
-                            params = {
-                                "alphabet": resource_path(
-                                    f"alphabets/ciphers/"
-                                    f"{f.alphabetCombo.currentData()}.json"
-                                ),
-                                "inp": text,
-                                "shift": f.operSpin.value(),
-                                "key": f.keyEdit.text(),
-                                "policy": effective_policy,
-                            }
-                            idx = f.operCombo.currentIndex()
-                            if not (0 <= idx < len(self.CIPHERS)):
-                                raise ActionError(f"Неверный индекс шифра: {idx}")
-                            cipher = self.CIPHERS[idx](**params)
-                            text = cipher.code() if code_radio else cipher.encode()
-                        except UnknownSymbolPolicyError as e:
-                            alphabet_path = self._alphabet_path_for(f, type_ind)
-                            chosen = self._ask_unknown_policy([e.symbol], alphabet_path)
-                            if chosen is None:
-                                return
-                            if chosen.mode == POLICY_WARN:
-                                QMessageBox.critical(self, "Ошибка", e.message)
-                                return
-                            base_policy = chosen
-                            retry = True
-                        except (UnknownSymbolError, MissingSpaceSymbolError) as e:
-                            text = f"{e.partial_out}\n[{e.message}]"
-                            QMessageBox.critical(self, "Ошибка", e.message)
-                            error_shown = True
-                        except (InvalidAlphabetError, MissingSpacerError) as e:
-                            self.outText.setPlainText(e.message)
-                            QMessageBox.critical(self, "Ошибка алфавита", e.message)
-                            error_shown = True
-                        except ActionError as e:
-                            self.outText.setPlainText(e.message)
-                            QMessageBox.critical(self, "Ошибка", e.message)
-                            error_shown = True
-
-                    case 3:  # Брайль
-                        try:
-                            braille = Braille(
-                                resource_path(
-                                    f"alphabets/braille/{f.alphabetCombo.currentData()}.json"
-                                ),
-                                text,
-                                policy=effective_policy,
-                            )
-                            text = braille.code() if code_radio else braille.encode()
-                        except UnknownSymbolPolicyError as e:
-                            alphabet_path = self._alphabet_path_for(f, type_ind)
-                            chosen = self._ask_unknown_policy([e.symbol], alphabet_path)
-                            if chosen is None:
-                                return
-                            if chosen.mode == POLICY_WARN:
-                                QMessageBox.critical(self, "Ошибка", e.message)
-                                return
-                            base_policy = chosen
-                            retry = True
-                        except (UnknownSymbolError, MissingSpaceSymbolError) as e:
-                            self.outText.setPlainText(f"{e.partial_out}\n[{e.message}]")
-                            QMessageBox.critical(self, "Ошибка", e.message)
-                            error_shown = True
-                        except (InvalidAlphabetError, MissingSpacerError) as e:
-                            self.outText.setPlainText(e.message)
-                            QMessageBox.critical(self, "Ошибка алфавита", e.message)
-                            error_shown = True
-                        except ActionError as e:
-                            self.outText.setPlainText(e.message)
-                            QMessageBox.critical(self, "Ошибка", e.message)
-                            error_shown = True
-
-                    case 4:  # Бинарный код
-                        try:
-                            binary = Bytes(text, f.alphabetCombo.currentData())
-                            text = binary.code() if code_radio else binary.encode()
-                        except ActionError as e:
-                            self.outText.setPlainText(e.message)
-                            QMessageBox.critical(self, "Ошибка", e.message)
-                            error_shown = True
-
-                if not retry:
-                    break
-                # retry=True — повторяем ту же карточку с новой base_policy
+                break
 
         self.outText.setPlainText(text)
 
@@ -654,11 +812,9 @@ if __name__ == "__main__":
     app.setStyle("fusion")
 
     load_settings()
-    
-    app.setStyleSheet(build_app_qss(get_palette()))
+
     app.setPalette(build_app_palette(get_palette()))
     app.setStyleSheet(build_app_qss(get_palette()))
-
 
     window = MainWindow()
     window.show()

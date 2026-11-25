@@ -10,11 +10,21 @@ class ActionError(Exception):
     Наследники несут дополнительный контекст (какой символ,
     какая часть результата уже готова и т.п.), чтобы вызывающий
     код мог показать пользователю осмысленное сообщение.
+
+    Презентационные атрибуты (title, icon) и метод dialog_spec()
+    позволяют UI показать ошибку единообразно, не разбирая типы.
     """
+
+    title: str = "Ошибка"
+    icon: str = "critical"  # "critical" | "warning" | "info"
 
     def __init__(self, message: str) -> None:
         super().__init__(message)
         self.message = message
+
+    def dialog_spec(self) -> tuple[str, str, str]:
+        """(заголовок, текст, иконка) для показа пользователю."""
+        return self.title, self.message, self.icon
 
 
 class CardCancelled(Exception):
@@ -32,14 +42,15 @@ class UnknownSymbolError(ActionError):
         message:     текстовое пояснение.
     """
 
-    def __init__(
-        self,
-        symbol: str,
-        partial_out: str,
-        message: str = "<-- этот символ отсутствует в выбранном словаре!",
-    ) -> None:
-        super().__init__(f"{symbol} {message}")
+    def __init__(self, symbol: str, alphabet_path: str, partial_out: str = ""):
+        self.symbol = symbol
+        self.alphabet_path = alphabet_path
         self.partial_out = partial_out
+        self.message = (
+            f"Символ {symbol!r} отсутствует в алфавите «{alphabet_path}». "
+            f"Политика: до первой ошибки."
+        )
+        super().__init__(self.message)
 
 
 class InvalidAlphabetError(ActionError):
@@ -50,6 +61,8 @@ class InvalidAlphabetError(ActionError):
         path:    путь к проблемному файлу;
         missing: список отсутствующих/некорректных ключей.
     """
+
+    title = "Ошибка алфавита"
 
     def __init__(self, path: str, missing: list[str]) -> None:
         message = (
@@ -72,6 +85,8 @@ class InvalidKeySymbolError(ActionError):
         alphabet_path: путь к JSON-алфавиту;
         message:      текстовое пояснение.
     """
+
+    title = "Ошибка ключа"
 
     def __init__(
         self,
@@ -99,6 +114,8 @@ class MissingSpacerError(ActionError):
         path: путь к файлу алфавита.
     """
 
+    title = "Ошибка алфавита"
+
     def __init__(self, path: str) -> None:
         message = f"В алфавите '{path}' не задан meta.spacer"
         super().__init__(message)
@@ -122,3 +139,30 @@ class MissingSpaceSymbolError(ActionError):
         super().__init__(message)
         self.symbol = symbol
         self.partial_out = partial_out
+
+class UnknownSymbolPolicyError(ActionError):
+    """
+    Политика «Предупреждение» встретила символ, отсутствующий в алфавите.
+
+    Несёт достаточно контекста, чтобы UI мог:
+      - показать partial_out;
+      - спросить пользователя о политике;
+      - повторить операцию.
+    """
+
+    title = "Неизвестный символ"
+
+    def __init__(
+        self,
+        symbol: str,
+        alphabet_path: str | None = None,
+        partial_out: str = "",
+    ) -> None:
+        self.symbol = symbol
+        self.alphabet_path = alphabet_path
+        self.partial_out = partial_out
+        self.message = (
+            f"Символ {symbol!r} отсутствует в алфавите "
+            f"{alphabet_path or '<неизвестно>'}."
+        )
+        super().__init__(self.message)

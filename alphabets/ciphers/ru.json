@@ -1,7 +1,6 @@
 {
     "meta": {
         "name": "Русский",
-        "data": "ru",
         "sep": "-",
         "shift": 3,
         "rows": 4,

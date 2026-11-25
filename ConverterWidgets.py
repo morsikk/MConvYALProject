@@ -5,6 +5,7 @@
 import json
 import os
 import sys
+import re
 from pathlib import Path
 
 from PyQt6 import QtCore, QtGui
@@ -36,13 +37,17 @@ from PyQt6.QtWidgets import (
     QSlider,
     QSizePolicy,
     QGridLayout,
+    QMessageBox,
+    QTableWidget,
+    QHeaderView,
+    QTableWidgetItem,
+    QFileDialog
 )
 from PyQt6.QtCore import QSize, Qt, pyqtSignal, QUrl, QEvent
 from PyQt6.QtGui import QFont, QPalette, QColor, QKeyEvent
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from Paths import data_path, resource_path
 from Settings import save_settings, reset_settings, SETTINGS, DEFAULT_SETTINGS
-
 
 # ============================================================
 #   ТЕМА: определение, палитры, QSS
@@ -452,7 +457,25 @@ def build_app_qss(p: dict) -> str:
         background: {p['accent']};
         border-radius: 2px;
     }}
+        /* --- Превью ввода Брайля --- */
+    QLabel#braillePreviewLabel {{
+        font-size: 32px;
+        font-weight: bold;
+        border: 1px solid {p['panel_border']};
+        border-radius: 6px;
+        padding: 6px;
+        background: {p['input_bg']};
+        color: {p['fg']};
+    }}
+    QLabel#braillePendingLabel {{
+        font-size: 16px; 
+        color: {p['accent_fg']}; 
+        background: {p['accent']}; 
+        border-radius: 4px; 
+        padding: 2px 6px;
+    }}
     """
+
 
 def apply_theme() -> None:
     """Пересобирает палитру и QSS по текущим настройкам."""
@@ -837,8 +860,8 @@ class ActionWidget(QWidget):
     @staticmethod
     def _fill_combo(combo, items: dict) -> None:
         combo.clear()
-        for meta in items.values():
-            combo.addItem(meta["name"], meta["data"])
+        for key, meta in items.items():
+            combo.addItem(meta["name"], key)
 
     # ------------------------------------------------------------------ #
     #  Обработчики
@@ -870,10 +893,8 @@ class ActionWidget(QWidget):
                 self._fill_combo(f.alphabetCombo, alps["number_systems"])
 
             case 2:
-                self._fill_combo(
-                    f.operCombo,
-                    {k: alps["ciphers"][k] for k in self.CIPHER_KEYS},
-                )
+                cipher_items = {k: alps["ciphers"][k] for k in self.CIPHER_KEYS}
+                self._fill_combo(f.operCombo, cipher_items)
                 self._fill_combo(f.alphabetCombo, alps["ciphers"]["alps"])
                 self.on_cipher_changed(f.operCombo.currentIndex())
 
@@ -901,15 +922,13 @@ class ActionWidget(QWidget):
             self._update_caesar_spin_range()
 
     def _update_caesar_spin_range(self) -> None:
-        """Длина алфавита берётся из упакованного ресурса."""
         f = self.mFLayout
-        code = f.alphabetCombo.currentData()  # "ru" / "en"
+        filename = f.alphabetCombo.currentData()  # "ru.json" / "en.json"
         n = 33
-        if code:
+        if filename:
             try:
-                # ВАЖНО: файл алфавита — read-only ресурс -> resource_path
                 with open(
-                    resource_path(f"alphabets/ciphers/{code}.json"),
+                    resource_path(f"alphabets/ciphers/{filename}"),
                     "r",
                     encoding="utf-8",
                 ) as fp:
@@ -941,11 +960,7 @@ class ActionWidget(QWidget):
 
 
 # ============================================================
-#   Настройки: страница, диалог
-# ============================================================
-
-# ============================================================
-#   Настройки: базовый каркас страницы
+#   Настройки: страницы, диалог
 # ============================================================
 
 
@@ -1047,9 +1062,7 @@ class GeneralPage(SettingsPage):
         if idx >= 0:
             self.themeCombo.setCurrentIndex(idx)
 
-        self.versionLabel.setText(
-            SETTINGS.get("version", DEFAULT_SETTINGS["version"])
-        )
+        self.versionLabel.setText(SETTINGS.get("version", DEFAULT_SETTINGS["version"]))
 
     def save(self) -> dict:
         return {"theme": self.themeCombo.currentText()}
@@ -1180,7 +1193,7 @@ class SettingsDialog(QDialog):
         for _, page in self.pages:
             res.update(page.save())
         save_settings(res)
-        apply_theme()   # мгновенно применяем тему
+        apply_theme()  # мгновенно применяем тему
 
     def collect_n_close(self) -> None:
         self.collect()
@@ -1287,392 +1300,856 @@ class MiniPlayer(QWidget):
             self.pause()
 
 
-# ============================================================
-#   Диалог для ввода Брайля
-# ============================================================
+# ====================================================================== #
+#  Базовое окно создания алфавита                                        #
+# ====================================================================== #
+class BaseAlphabetDialog(QDialog):
+    """
+    Базовое окно создания/редактирования JSON-алфавита.
+    Наследники задают:
+      - alphabet_type: str ("braille", "cipher", "numeral")
+      - _build_meta_form(): добавляет поля meta в self.meta_form
+      - _validate_meta(): проверяет meta, возвращает (ok, error)
+      - _build_value_editor(): создаёт виджет редактора значений
+      - _make_row_value_editor(row): создаёт редактор значения для строки
+      - _read_row_value(row) -> Any: читает значение из редактора строки
+      - _write_row_value(row, value): записывает значение в редактор строки
+      - _serialize() -> dict: итоговый JSON
+    """
 
+    alphabet_type: str = "generic"
+    key_header: str = "Ключ"
+    value_header: str = "Значение"
 
-class BrailleDialog(QDialog):
-    def __init__(self, /, parent=None):
+    def __init__(self, /, parent=None, initial: dict | None = None,
+                 default_filename: str = ""):
         super().__init__(parent)
-        self.setWindowTitle("Ввод Брайля")
-        self._SEPARATORS = set(" .,!?;:-—()[]{}«»\"'\n\t")
+        self.setWindowTitle(f"Создание алфавита — {self.alphabet_type}")
+        self._initial = initial or {}
+        self._result_data: dict | None = None
 
-        self._NUMPAD_TO_DOT = {
-            Qt.Key.Key_7: 0,
-            Qt.Key.Key_8: 1,
-            Qt.Key.Key_4: 2,
-            Qt.Key.Key_5: 3,
-            Qt.Key.Key_1: 4,
-            Qt.Key.Key_2: 5,
-        }
+        self._vbox = QVBoxLayout(self)
 
-        self.mHBoxLayout = QHBoxLayout(self)
+        # --- Имя файла ---
+        file_row = QHBoxLayout()
+        file_row.addWidget(QLabel("Имя JSON-файла:"))
+        self.fileEdit = QLineEdit(default_filename or self._default_filename())
+        self.fileEdit.setPlaceholderText("например, en6.json")
+        file_row.addWidget(self.fileEdit, 1)
+        browse = QPushButton("…")
+        browse.clicked.connect(self._browse_file)
+        file_row.addWidget(browse)
+        self._vbox.addLayout(file_row)
 
-        self.leftVLayout = QVBoxLayout()
-        self.mHBoxLayout.addLayout(self.leftVLayout, 1)
+        # --- meta ---
+        meta_box = QVBoxLayout()
+        self.meta_form = QFormLayout()
+        self._build_meta_form()
+        meta_box.addLayout(self.meta_form)
+        self._vbox.addLayout(meta_box)
 
-        self.leftVLayout.addWidget(QLabel("Алфавит:"))
-        self.alphabetCombo = QComboBox()
-        self.leftVLayout.addWidget(self.alphabetCombo)
+        # --- Таблица ключ-значение ---
+        self.table = QTableWidget(0, 2)
+        self.table.setHorizontalHeaderLabels([self.key_header, self.value_header])
+        self.table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.Stretch)
+        self._vbox.addWidget(self.table, 1)
 
-        self.previewLabel = QLabel("—")
-        self.previewLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.previewLabel.setMinimumHeight(56)
-        self.previewLabel.setStyleSheet(
-            "font-size: 28px; font-weight: bold; "
-            "border: 1px solid palette(mid); border-radius: 6px; padding: 4px;"
-        )
-        self.leftVLayout.addWidget(self.previewLabel)
+        btn_row = QHBoxLayout()
+        add_btn = QPushButton("Добавить строку")
+        add_btn.clicked.connect(self._add_row)
+        del_btn = QPushButton("Удалить строку")
+        del_btn.clicked.connect(self._remove_row)
+        btn_row.addWidget(add_btn)
+        btn_row.addWidget(del_btn)
+        btn_row.addStretch(1)
+        self._vbox.addLayout(btn_row)
 
-        self.modeLabel = QLabel("")
-        self.modeLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.modeLabel.setStyleSheet("color: palette(mid);")
-        self.leftVLayout.addWidget(self.modeLabel)
-
-        self.rightGLayout = QGridLayout()
-        self.leftVLayout.addLayout(self.rightGLayout, 1)
-
-        self.brailleOut = QPlainTextEdit()
-        self.brailleOut.setReadOnly(True)
-        self.mHBoxLayout.addWidget(self.brailleOut, 1)
-
+        # --- OK / Cancel ---
         self.buttonBox = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel)
         self.buttonBox.accepted.connect(self._on_accept)
         self.buttonBox.rejected.connect(self.reject)
-        self.leftVLayout.addWidget(self.buttonBox)
+        self._vbox.addWidget(self.buttonBox)
 
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._load_initial()
 
-        self.pressed = [False] * 6
-        self._buffer: list[str] = []
-        self._alphabet: dict = {}
-        self._dot_index: dict[frozenset[int], str] = {}
-        self._digits: dict = {}
-        self._prefixes: dict = {}
+    # ---------- настройки по умолчанию (переопределяются) ---------- #
+    def _default_filename(self) -> str:
+        return f"{self.alphabet_type}.json"
 
-        self._num_mode = False
-        self._capital_word_mode = False
-        self._capital_one = False
-        self._grade1_one = False
+    def _build_meta_form(self):
+        raise NotImplementedError
 
-        for col in range(3):
-            self.rightGLayout.setColumnStretch(col, 1)
-        for row in range(3):
-            self.rightGLayout.setRowStretch(row, 1)
+    def _validate_meta(self) -> tuple[bool, str]:
+        raise NotImplementedError
 
-        for i in range(6):
+    def _make_row_value_editor(self, row: int) -> QWidget:
+        return QLineEdit()
+
+    def _read_row_value(self, row: int):
+        w = self.table.cellWidget(row, 1)
+        if isinstance(w, QLineEdit):
+            return w.text()
+        return ""
+
+    def _write_row_value(self, row: int, value):
+        w = self.table.cellWidget(row, 1)
+        if isinstance(w, QLineEdit):
+            w.setText("" if value is None else str(value))
+
+    def _serialize(self) -> dict:
+        raise NotImplementedError
+
+    # ---------- работа с таблицей ---------- #
+    def _add_row(self, key: str = "", value = None) -> int:
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        self.table.setItem(row, 0, QTableWidgetItem(key))
+        self.table.setCellWidget(row, 1, self._make_row_value_editor(row))
+        self._write_row_value(row, value)
+        return row
+
+    def _remove_row(self):
+        rows = sorted({i.row() for i in self.table.selectedIndexes()},
+                      reverse=True)
+        for r in rows:
+            self.table.removeRow(r)
+
+    def _load_initial(self):
+        if not self._initial:
+            # пустая строка для удобства
+            self._add_row()
+            return
+        for k, v in self._initial.items():
+            if isinstance(v, dict) and "char" in v:
+                # braille-формат: {key: {"char": ..., "dots": [...]}}
+                self._add_row(k, v.get("char", ""))
+            else:
+                self._add_row(k, v)
+
+    # ---------- файл ---------- #
+    def _browse_file(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Куда сохранить JSON", self.fileEdit.text(),
+            "JSON (*.json)")
+        if path:
+            self.fileEdit.setText(os.path.basename(path))
+
+    # ---------- принятие ---------- #
+    def _on_accept(self):
+        ok, err = self._validate_meta()
+        if not ok:
+            QMessageBox.warning(self, "Ошибка", err)
+            return
+        fname = self.fileEdit.text().strip()
+        if not fname:
+            QMessageBox.warning(self, "Ошибка", "Укажите имя JSON-файла.")
+            return
+        if not fname.endswith(".json"):
+            fname += ".json"
+        if not re.fullmatch(r"[\w.\-]+\.json", fname):
+            QMessageBox.warning(self, "Ошибка",
+                                "Имя файла содержит недопустимые символы.")
+            return
+
+        # проверка на дубликаты ключей
+        seen = set()
+        for r in range(self.table.rowCount()):
+            item = self.table.item(r, 0)
+            key = item.text().strip() if item else ""
+            if not key:
+                QMessageBox.warning(self, "Ошибка",
+                                    f"Строка {r+1}: пустой ключ.")
+                return
+            if key in seen:
+                QMessageBox.warning(self, "Ошибка",
+                                    f"Дублирующийся ключ: {key!r}")
+                return
+            seen.add(key)
+
+        try:
+            data = self._serialize()
+        except Exception as e:  # noqa: BLE001
+            QMessageBox.warning(self, "Ошибка", str(e))
+            return
+
+        self._result_data = data
+        self._result_filename = fname
+        self.accept()
+
+    def result_data(self) -> dict | None:
+        return self._result_data
+
+    def result_filename(self) -> str:
+        return getattr(self, "_result_filename", "")
+
+
+# ====================================================================== #
+#  Шифр / Морзе                                                          #
+# ====================================================================== #
+class CipherAlphabetDialog(BaseAlphabetDialog):
+    """
+    Создание алфавита-шифра (например, Азбука Морзе).
+    Meta (обязательны): name, data. Необязательны: separator/spacer и т.п.
+    Значения — произвольные строки.
+    """
+
+    alphabet_type = "cipher"
+    key_header = "Символ"
+    value_header = "Код"
+
+    def _default_filename(self) -> str:
+        return "new_cipher.json"
+
+    def _build_meta_form(self):
+        self.nameEdit = QLineEdit()
+        self.nameEdit.setPlaceholderText("например, Английский")
+        self.meta_form.addRow("name *:", self.nameEdit)
+
+        self.dataEdit = QLineEdit()
+        self.dataEdit.setPlaceholderText("например, en")
+        self.meta_form.addRow("data *:", self.dataEdit)
+
+        self.spacerEdit = QLineEdit()
+        self.spacerEdit.setPlaceholderText("например, пробел")
+        self.meta_form.addRow("spacer:", self.spacerEdit)
+
+    def _validate_meta(self) -> tuple[bool, str]:
+        if not self.nameEdit.text().strip():
+            return False, "Поле name обязательно."
+        if not self.dataEdit.text().strip():
+            return False, "Поле data обязательно."
+        return True, ""
+
+    def _serialize(self) -> dict:
+        letters: dict = {}
+        for r in range(self.table.rowCount()):
+            item = self.table.item(r, 0)
+            key = item.text().strip() if item else ""
+            val = self._read_row_value(r)
+            if not key:
+                raise ValueError(f"Строка {r+1}: пустой ключ.")
+            if val is None or val == "":
+                raise ValueError(f"Строка {r+1}: пустое значение.")
+            letters[key] = val
+
+        meta = {
+            "name": self.nameEdit.text().strip(),
+            "data": self.dataEdit.text().strip(),
+        }
+        if self.spacerEdit.text().strip():
+            meta["spacer"] = self.spacerEdit.text().strip()
+        return {"meta": meta, "letters": letters}
+
+
+# ====================================================================== #
+#  Система счисления                                                     #
+# ====================================================================== #
+class NumeralAlphabetDialog(BaseAlphabetDialog):
+    """
+    Создание алфавита системы счисления.
+    Meta (обязательны): name, data. Значения — целые числа.
+    """
+
+    alphabet_type = "numeral"
+    key_header = "Символ"
+    value_header = "Значение (int)"
+
+    def _default_filename(self) -> str:
+        return "new_numeral.json"
+
+    def _build_meta_form(self):
+        self.nameEdit = QLineEdit()
+        self.nameEdit.setPlaceholderText("например, Стандартный (до 36)")
+        self.meta_form.addRow("name *:", self.nameEdit)
+
+        self.dataEdit = QLineEdit()
+        self.dataEdit.setPlaceholderText("например, standart")
+        self.meta_form.addRow("data *:", self.dataEdit)
+
+    def _validate_meta(self) -> tuple[bool, str]:
+        if not self.nameEdit.text().strip():
+            return False, "Поле name обязательно."
+        if not self.dataEdit.text().strip():
+            return False, "Поле data обязательно."
+        return True, ""
+
+    def _make_row_value_editor(self, row: int) -> QWidget:
+        spin = QSpinBox()
+        spin.setRange(0, 10_000_000)
+        return spin
+
+    def _read_row_value(self, row: int):
+        w = self.table.cellWidget(row, 1)
+        return w.value() if isinstance(w, QSpinBox) else 0
+
+    def _write_row_value(self, row: int, value):
+        w = self.table.cellWidget(row, 1)
+        if isinstance(w, QSpinBox):
+            try:
+                w.setValue(int(value))
+            except (TypeError, ValueError):
+                w.setValue(0)
+
+    def _serialize(self) -> dict:
+        letters: dict = {}
+        for r in range(self.table.rowCount()):
+            item = self.table.item(r, 0)
+            key = item.text().strip() if item else ""
+            if not key:
+                raise ValueError(f"Строка {r+1}: пустой ключ.")
+            letters[key] = self._read_row_value(r)
+
+        meta = {
+            "name": self.nameEdit.text().strip(),
+            "data": self.dataEdit.text().strip(),
+        }
+        return {"meta": meta, "letters": letters}
+
+
+class BrailleInputWidget(QWidget):
+    """
+    Виджет для ввода символов Брайля.
+
+    Сетка 3x3:
+        00 01 02
+        10 11 12
+        20 21 22
+
+    Точки: [00, 10, 20, 01, 11, 21] -> dots [0, 1, 2, 3, 4, 5]
+    12 = "+" (сохранить символ, начать новый)
+    02 = "<-" (Backspace)
+    22 = "Enter" (добавить в целевой виджет)
+    """
+
+    character_committed = pyqtSignal(str)
+
+    DOT_CHAR = "●"
+
+    DOT_BUTTONS = {
+        (0, 0): 0,
+        (1, 0): 1,
+        (2, 0): 2,
+        (0, 1): 3,
+        (1, 1): 4,
+        (2, 1): 5,
+    }
+
+    PLUS_BUTTON = (1, 2)
+    BACKSPACE_BUTTON = (0, 2)
+    ENTER_BUTTON = (2, 2)
+
+    ALPHABETS_JSON = "alphabets/alphabets.json"
+    BRAILLE_DIR = "alphabets/braille"
+
+    # Базовый код Unicode для символов Брайля
+    BRAILLE_BASE = 0x2800
+
+    def __init__(self, target_widget=None, parent=None):
+        super().__init__(parent)
+        self.target_widget = target_widget
+
+        self._current_dots = set()
+        self._committed_chars = []
+        self._alphabet_data = {}
+        self._alphabet_name = ""
+
+        self._dots_to_char = {}
+        self._char_to_dots = {}
+        self._prefixes = {}
+
+        self._current_dots = set()
+        self._committed_chars = []
+        self._alphabet_data = {}
+        self._alphabet_name = ""
+
+        self._dots_to_char = {}
+        self._char_to_dots = {}
+        self._prefixes = {}
+
+        # Состояние «намерения» между наборами (Enter его не сбрасывает)
+        self._pending_capital = False      # ⇧ одна буква
+        self._pending_capital_word = False # ⇧⇧ до пробела
+        self._pending_number = False       # № до пробела
+
+        self._build_ui()
+        self._load_alphabet_list()
+        self._load_alphabet(self.alphabet_combo.currentData())
+
+    # ------------------------------------------------------------------ #
+    #  UI
+    # ------------------------------------------------------------------ #
+
+    def _build_ui(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(8, 8, 8, 8)
+        main_layout.setSpacing(8)
+
+        top_layout = QHBoxLayout()
+        top_layout.addWidget(QLabel("Алфавит Брайля:"))
+        self.alphabet_combo = QComboBox()
+        self.alphabet_combo.currentIndexChanged.connect(
+            self._on_alphabet_changed
+        )
+        top_layout.addWidget(self.alphabet_combo, 1)
+        main_layout.addLayout(top_layout)
+
+        self.display_frame = QFrame()
+        self.display_frame.setFrameShape(QFrame.Shape.StyledPanel)
+        self.display_frame.setMinimumHeight(100)
+        self.display_frame.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        display_layout = QVBoxLayout(self.display_frame)
+        display_layout.setContentsMargins(8, 8, 8, 8)
+
+        # Центральный перевод (большой) — обычный текст, без изменения цвета
+        self.center_label = QLabel("")
+        self.center_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        font = QFont()
+        font.setPointSize(28)
+        font.setBold(True)
+        self.center_label.setFont(font)
+        display_layout.addWidget(self.center_label, 1)
+
+        # Правый угол: текущий буфер в виде БРАЙЛЕВСКИХ символов
+        self.buffer_label = QLabel("")
+        self.buffer_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom
+        )
+        buf_font = QFont("Monospace")
+        buf_font.setPointSize(14)
+        self.buffer_label.setFont(buf_font)
+        display_layout.addWidget(self.buffer_label, 0)
+
+        main_layout.addWidget(self.display_frame, 1)
+
+        grid = QGridLayout()
+        grid.setSpacing(6)
+
+        self.dot_buttons = {}
+        self.special_buttons = {}
+
+        for (row, col), dot_idx in self.DOT_BUTTONS.items():
             btn = QPushButton()
             btn.setCheckable(True)
-            btn.setObjectName(f"dot_{i}")
-            btn.toggled.connect(self.on_dot_toggled)
-            btn.setSizePolicy(
-                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+            btn.setMinimumSize(60, 60)
+            btn.setFont(QFont("Sans", 22))
+            btn.clicked.connect(
+                lambda checked, d=dot_idx: self._on_dot_toggled(d, checked)
             )
-            self.rightGLayout.addWidget(btn, i // 2, i % 2)
+            grid.addWidget(btn, row, col)
+            self.dot_buttons[dot_idx] = btn
 
-        bspaceBtn = QPushButton("<-")
-        bspaceBtn.clicked.connect(self.backspace)
-        bspaceBtn.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
-        self.rightGLayout.addWidget(bspaceBtn, 0, 2)
+        plus_btn = QPushButton("+")
+        plus_btn.setMinimumSize(60, 60)
+        plus_btn.setFont(QFont("Sans", 20, QFont.Weight.Bold))
+        plus_btn.clicked.connect(self._on_plus)
+        grid.addWidget(plus_btn, *self.PLUS_BUTTON)
+        self.special_buttons["plus"] = plus_btn
 
-        enterBtn = QPushButton("↵")
-        enterBtn.clicked.connect(self.enter)
-        enterBtn.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
-        self.rightGLayout.addWidget(enterBtn, 1, 2, 2, 1)
+        back_btn = QPushButton("←")
+        back_btn.setMinimumSize(60, 60)
+        back_btn.setFont(QFont("Sans", 18, QFont.Weight.Bold))
+        back_btn.clicked.connect(self._on_backspace)
+        grid.addWidget(back_btn, *self.BACKSPACE_BUTTON)
+        self.special_buttons["backspace"] = back_btn
 
-        self._load_alphabets()
+        enter_btn = QPushButton("Enter")
+        enter_btn.setMinimumSize(60, 60)
+        enter_btn.setFont(QFont("Sans", 12, QFont.Weight.Bold))
+        enter_btn.clicked.connect(self._on_enter)
+        grid.addWidget(enter_btn, *self.ENTER_BUTTON)
+        self.special_buttons["enter"] = enter_btn
 
-    def showEvent(self, event):
-        super().showEvent(event)
-        app = QApplication.instance()
-        if app is not None:
-            app.installEventFilter(self)
-        self.setFocus(Qt.FocusReason.OtherFocusReason)
+        main_layout.addLayout(grid, 0)
 
-    def hideEvent(self, event):
-        app = QApplication.instance()
-        if app is not None:
-            app.removeEventFilter(self)
-        super().hideEvent(event)
-
-    def eventFilter(self, obj, event):
-        if event.type() == QEvent.Type.KeyPress and self.isVisible():
-            if self._handle_key(event):
-                return True
-        return super().eventFilter(obj, event)
-
-    def _handle_key(self, event: QKeyEvent) -> bool:
-        key = event.key()
-
-        if key in self._NUMPAD_TO_DOT:
-            idx = self._NUMPAD_TO_DOT[key]
-            btn = self.findChild(QPushButton, f"dot_{idx}")
-            if btn is not None:
-                btn.toggle()
-            return True
-
-        if key == Qt.Key.Key_Backspace:
-            self.backspace()
-            return True
-
-        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-            self.enter()
-            return True
-
-        return False
+        self.hint_label = QLabel("")
+        self.hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.hint_label.setWordWrap(True)
+        main_layout.addWidget(self.hint_label)
 
     # ------------------------------------------------------------------ #
-    #  Загрузка алфавитов (все пути — через resource_path)
+    #  Загрузка алфавитов
     # ------------------------------------------------------------------ #
-    def _alphabets_dir(self) -> str:
-        return resource_path("alphabets/braille")
 
-    def _load_alphabets(self):
-        meta_path = resource_path("alphabets/alphabets.json")
+    def _resource_path(self, relative_path: str) -> str:
+        base = os.path.dirname(os.path.abspath(__file__))
+        return os.path.join(base, relative_path)
+
+    def _load_alphabet_list(self):
+        self.alphabet_combo.blockSignals(True)
+        self.alphabet_combo.clear()
         try:
-            with open(meta_path, "r", encoding="utf-8") as f:
-                alps = json.load(f)
-            braille_meta = alps.get("braille", {})
-        except (OSError, json.JSONDecodeError):
-            braille_meta = {}
-
-        if not braille_meta:
-            d = self._alphabets_dir()
-            if os.path.isdir(d):
-                for fname in sorted(os.listdir(d)):
-                    if fname.endswith(".json"):
-                        data = os.path.splitext(fname)[0]
-                        braille_meta[data] = {"name": data, "data": data}
-
-        self.alphabetCombo.clear()
-        for meta in braille_meta.values():
-            self.alphabetCombo.addItem(meta["name"], meta["data"])
-
-        self.alphabetCombo.currentIndexChanged.connect(self._on_alphabet_changed)
-        if self.alphabetCombo.count() > 0:
-            self._on_alphabet_changed(0)
+            with open(
+                self._resource_path(self.ALPHABETS_JSON),
+                "r", encoding="utf-8"
+            ) as fp:
+                data = json.load(fp)
+            for filename, meta in data.get("braille", {}).items():
+                self.alphabet_combo.addItem(meta.get("name", filename), filename)
+        except (FileNotFoundError, json.JSONDecodeError) as exc:
+            self.alphabet_combo.addItem(f"Ошибка: {exc}", None)
+        self.alphabet_combo.blockSignals(False)
 
     def _on_alphabet_changed(self, index: int):
-        if index < 0:
-            return
-        data = self.alphabetCombo.itemData(index)
-        path = resource_path(f"alphabets/braille/{data}.json")
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                self._alphabet = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            self._alphabet = {}
-        self._rebuild_dot_index()
-        self._update_preview()
+        filename = self.alphabet_combo.currentData()
+        self._load_alphabet(filename)
 
-    def _rebuild_dot_index(self):
-        self._dot_index.clear()
-        if not self._alphabet:
+    def _load_alphabet(self, filename):
+        self._alphabet_data = {}
+        self._dots_to_char = {}
+        self._char_to_dots = {}
+        self._prefixes = {}
+        self._alphabet_name = ""
+
+        if not filename:
+            self._update_display()
             return
-        for section in ("letters", "punctuation", "math"):
-            for sym, info in self._alphabet.get(section, {}).items():
-                dots = info.get("dots")
+
+        path = self._resource_path(
+            os.path.join(self.BRAILLE_DIR, filename)
+        )
+        try:
+            with open(path, "r", encoding="utf-8") as fp:
+                data = json.load(fp)
+        except (FileNotFoundError, json.JSONDecodeError) as exc:
+            self.hint_label.setText(f"Не удалось загрузить {filename}: {exc}")
+            self._update_display()
+            return
+
+        self._alphabet_data = data
+        self._alphabet_name = data.get("meta", {}).get("name", filename)
+        self._prefixes = data.get("prefixes", {})
+
+        for section in ("letters", "digits", "punctuation", "math"):
+            for char, meta in data.get(section, {}).items():
+                dots = meta.get("dots")
                 if dots is None:
                     continue
-                self._dot_index.setdefault(frozenset(dots), sym)
-        self._digits = self._alphabet.get("digits", {})
-        self._prefixes = self._alphabet.get("prefixes", {})
+                key = frozenset(dots)
+                if key not in self._dots_to_char:
+                    self._dots_to_char[key] = char
+                if char not in self._char_to_dots:
+                    self._char_to_dots[char] = key
 
-    def on_dot_toggled(self, checked):
-        btn: QPushButton = self.sender()
-        idx = int(btn.objectName().split("_")[1])
-        self.pressed[idx] = checked
-        btn.setText("•" if checked else "")
-        self._update_preview()
+        self._update_hint()
+        self._update_display()
 
-    def _current_dots(self) -> frozenset[int]:
-        return frozenset(i for i, v in enumerate(self.pressed) if v)
+    # ------------------------------------------------------------------ #
+    #  Логика ввода
+    # ------------------------------------------------------------------ #
 
-    def _current_dots_list(self) -> list[int]:
-        return [i for i, v in enumerate(self.pressed) if v]
+    def _on_dot_toggled(self, dot_idx: int, checked: bool):
+        if checked:
+            self._current_dots.add(dot_idx)
+        else:
+            self._current_dots.discard(dot_idx)
+        self._update_button_states()
+        self._update_display()
 
-    def _reset_dots(self):
-        for i in range(6):
-            btn = self.findChild(QPushButton, f"dot_{i}")
-            if btn is not None:
-                btn.setChecked(False)
+    def _update_button_states(self):
+        """Синхронизирует ВСЕ кнопки (текст + checked) с _current_dots."""
+        for dot_idx, btn in self.dot_buttons.items():
+            is_on = dot_idx in self._current_dots
+            # Важно: блокируем сигналы, чтобы клики не вызывали рекурсию
+            btn.blockSignals(True)
+            btn.setChecked(is_on)
+            btn.setText(self.DOT_CHAR if is_on else "")
+            btn.blockSignals(False)
 
-    def _prefix_kind(self, dots_list: list[int]) -> str | None:
-        if not dots_list or not self._prefixes:
-            return None
-        for key, pmeta in self._prefixes.items():
-            if dots_list == list(pmeta["dots"]):
-                return {
-                    "num_prefix": "num",
-                    "capital_prefix": "capital",
-                    "capital_word_prefix": "capital_word",
-                    "grade1_symbol": "grade1",
-                }.get(key)
+    def _reset_pending_if_prefix(self, dots: frozenset):
+        """Сбрасывает persistent-флаг, если стираемый набор — соответствующий префикс."""
+        cap_prefix = self._get_prefix_dots("capital_prefix")
+        cap_word_prefix = self._get_prefix_dots("capital_word_prefix")
+        num_prefix = self._get_prefix_dots("num_prefix")
+        grade1_prefix = self._get_prefix_dots("grade1_symbol")
+
+        if cap_prefix and dots == cap_prefix:
+            self._pending_capital = False
+            self._pending_capital_word = False
+        elif cap_word_prefix and dots == cap_word_prefix:
+            self._pending_capital_word = False
+        elif num_prefix and dots == num_prefix:
+            self._pending_number = False
+        elif grade1_prefix and dots == grade1_prefix:
+            pass  # grade1 не хранится как persistent-флаг
+
+    def _on_plus(self):
+        self._committed_chars.append(frozenset(self._current_dots))
+        self._current_dots.clear()
+        self._update_button_states()
+        self._update_display()
+
+    def _on_backspace(self):
+        if self._current_dots:
+            # Стираем текущий редактируемый набор.
+            # Если это был префикс — сбрасываем соответствующее «намерение».
+            self._reset_pending_if_prefix(frozenset(self._current_dots))
+            self._current_dots.clear()
+            self._update_button_states()
+        elif self._committed_chars:
+            # Возвращаем предыдущий символ в редактируемое состояние.
+            prev = self._committed_chars.pop()
+            self._current_dots = set(prev)
+            self._update_button_states()
+        self._update_display()
+
+    def _on_enter(self):
+        """Вставляет БРАЙЛЕВСКИЕ символы (Unicode) в целевой виджет.
+        Пустой текущий набор = пробел (U+2800), вставляется всегда."""
+        # Всегда включаем текущий набор (даже пустой -> пробел)
+        text = self._render_braille_text(include_current_always=True)
+        if not text:
+            return
+
+        if self.target_widget is not None:
+            if hasattr(self.target_widget, "insertPlainText"):
+                self.target_widget.insertPlainText(text)
+            elif hasattr(self.target_widget, "insert"):
+                self.target_widget.insert(text)
+            elif hasattr(self.target_widget, "setText"):
+                current = self.target_widget.text() if hasattr(
+                    self.target_widget, "text"
+                ) else ""
+                self.target_widget.setText(current + text)
+            else:
+                try:
+                    self.target_widget.setText(
+                        self.target_widget.toPlainText() + text
+                    )
+                except Exception:
+                    pass
+
+        self.character_committed.emit(text)
+
+        self._committed_chars.clear()
+        self._current_dots.clear()
+        self._update_button_states()
+        self._update_display()
+
+    # ------------------------------------------------------------------ #
+    #  Преобразование точек <-> Брайль (Unicode)
+    # ------------------------------------------------------------------ #
+
+    def _dots_to_braille_char(self, dots) -> str:
+        """
+        Преобразует набор точек (0..5) в Unicode-символ Брайля.
+        Пустой набор -> пробел (U+2800).
+        """
+        mask = 0
+        for d in dots:
+            if 0 <= d <= 5:
+                mask |= (1 << d)
+        return chr(self.BRAILLE_BASE + mask)
+
+    def _render_braille_text(self, include_current_always: bool = False) -> str:
+        """Буфер (committed + current) -> строка БРАЙЛЕВСКИХ символов.
+        include_current_always=True — текущий набор добавляется даже пустым
+        (пустой набор -> брайлевский пробел U+2800)."""
+        chars = list(self._committed_chars)
+        if self._current_dots or include_current_always:
+            chars.append(frozenset(self._current_dots))
+        return "".join(self._dots_to_braille_char(d) for d in chars)
+
+    # ------------------------------------------------------------------ #
+    #  Отображение
+    # ------------------------------------------------------------------ #
+
+    def _dots_to_char_safe(self, dots: frozenset) -> str:
+        if not dots:
+            return " "
+        return self._dots_to_char.get(dots, "?")
+
+    def _is_prefix_dots(self, dots: frozenset, prefix_key: str) -> bool:
+        p = self._prefixes.get(prefix_key)
+        if not p:
+            return False
+        return frozenset(p.get("dots", [])) == dots
+
+    def _get_prefix_dots(self, prefix_key: str) -> frozenset:
+        p = self._prefixes.get(prefix_key)
+        if not p:
+            return frozenset()
+        return frozenset(p.get("dots", []))
+
+    def _render_buffer_text(self) -> str:
+        """
+        Текст для ЦЕНТРАЛЬНОГО предпросмотра.
+        Пустой набор точек -> '␣'.
+        Префиксы -> 'pref⇧' / 'pref⇧⇧' / 'pref№' / 'pref¹'.
+        Заглавность/цифровой режим сохраняются между Enter'ами.
+        """
+        result = []
+        chars = list(self._committed_chars)
+        # текущий набор добавляем всегда (пустой -> пробел ␣)
+        chars.append(frozenset(self._current_dots))
+
+        if not chars:
+            return ""
+
+        cap_prefix = self._get_prefix_dots("capital_prefix")
+        cap_word_prefix = self._get_prefix_dots("capital_word_prefix")
+        num_prefix = self._get_prefix_dots("num_prefix")
+        grade1_prefix = self._get_prefix_dots("grade1_symbol")
+
+        # Локальные «рабочие» копии persistent-флагов
+        in_number = self._pending_number
+        capitalize_next = self._pending_capital
+        capitalize_word = self._pending_capital_word
+
+        # Результат применения persistent-флагов после прохода
+        new_pending_capital = capitalize_next
+        new_pending_capital_word = capitalize_word
+        new_pending_number = in_number
+
+        i = 0
+        while i < len(chars):
+            dots = chars[i]
+            i += 1
+
+            # --- пустой набор: пробел ---
+            if not dots:
+                result.append("␣")
+                in_number = False
+                capitalize_next = False
+                capitalize_word = False
+                new_pending_number = False
+                new_pending_capital = False
+                new_pending_capital_word = False
+                continue
+
+            # --- префиксы ---
+            if cap_prefix and dots == cap_prefix:
+                result.append("pref⇧")
+                # второй ⇧ подряд (или уже был) => до пробела
+                if capitalize_next or capitalize_word:
+                    capitalize_word = True
+                    capitalize_next = False
+                    new_pending_capital_word = True
+                    new_pending_capital = False
+                else:
+                    capitalize_next = True
+                    new_pending_capital = True
+                continue
+
+            if cap_word_prefix and dots == cap_word_prefix:
+                result.append("pref⇧⇧")
+                capitalize_word = True
+                capitalize_next = False
+                new_pending_capital_word = True
+                new_pending_capital = False
+                continue
+
+            if num_prefix and dots == num_prefix:
+                result.append("pref№")
+                in_number = True
+                new_pending_number = True
+                continue
+
+            if grade1_prefix and dots == grade1_prefix:
+                result.append("pref¹")
+                continue
+
+            # --- обычный символ ---
+            char = self._dots_to_char_safe(dots)
+
+            if in_number:
+                digit_char = self._digit_for_dots(dots)
+                if digit_char is not None:
+                    char = digit_char
+                else:
+                    in_number = False
+                    new_pending_number = False
+
+            # заглавность
+            if capitalize_word or capitalize_next:
+                char = char.upper() if char.isalpha() else char
+                capitalize_next = False
+                new_pending_capital = False
+            else:
+                char = char.lower() if char.isalpha() else char
+
+            # caps-слово: сбрасывается на не-букве (пробел уже обработан выше)
+            if capitalize_word and not char.isalpha():
+                capitalize_word = False
+                new_pending_capital_word = False
+
+            result.append(char)
+
+        # Сохраняем «намерение» на будущее (Enter его не сбрасывает)
+        self._pending_capital = new_pending_capital
+        self._pending_capital_word = new_pending_capital_word
+        self._pending_number = new_pending_number
+
+        return "".join(result)
+    
+    def _digit_for_dots(self, dots: frozenset):
+        digits = self._alphabet_data.get("digits", {})
+        for d_char, meta in digits.items():
+            if frozenset(meta.get("dots", [])) == dots:
+                return d_char
         return None
 
-    def _char_from_dots(self, dots: frozenset[int]) -> str | None:
-        if not dots:
-            return None
+    def _char_for_current(self) -> str:
+        if not self._current_dots:
+            return ""
+        return self._dots_to_char_safe(frozenset(self._current_dots))
 
-        if self._num_mode:
-            for digit, info in self._digits.items():
-                if frozenset(info["dots"]) == dots:
-                    return digit
-            return None
+    def _update_display(self):
+        full_text = self._render_buffer_text()
+        self.center_label.setText(full_text if full_text else "␣")
 
-        ch = self._dot_index.get(dots)
-        if ch is None:
-            return None
-
-        if ch.isalpha():
-            if self._capital_word_mode or self._capital_one:
-                return ch.upper()
-            return ch.lower()
-        return ch
-
-    def backspace(self):
-        if self._grade1_one:
-            self._grade1_one = False
-        elif self._capital_one:
-            self._capital_one = False
-        elif self._num_mode or self._capital_word_mode:
-            self._num_mode = False
-            self._capital_word_mode = False
-        elif self._buffer:
-            self._buffer.pop()
-            self.brailleOut.setPlainText("".join(self._buffer))
-        self._reset_dots()
-        self._update_preview()
-
-    def enter(self):
-        dots = self._current_dots()
-        dots_list = self._current_dots_list()
-
-        if not dots:
-            self._buffer.append("\n")
-            self._reset_all_modes()
-            self.brailleOut.setPlainText("".join(self._buffer))
-            self._reset_dots()
-            self._update_preview()
-            return
-
-        kind = self._prefix_kind(dots_list)
-        if kind is not None:
-            if kind == "num":
-                self._num_mode = True
-                self._capital_word_mode = False
-                self._capital_one = False
-                self._grade1_one = False
-            elif kind == "capital_word":
-                self._capital_word_mode = True
-                self._num_mode = False
-                self._capital_one = False
-                self._grade1_one = False
-            elif kind == "capital":
-                if self._capital_word_mode:
-                    self._reset_dots()
-                    self._update_preview()
-                    return
-                if self._capital_one:
-                    self._capital_word_mode = True
-                    self._capital_one = False
-                else:
-                    self._capital_one = True
-                self._num_mode = False
-                self._grade1_one = False
-            elif kind == "grade1":
-                self._grade1_one = True
-            self._reset_dots()
-            self._update_preview()
-            return
-
-        ch = self._char_from_dots(dots)
-        if ch is not None:
-            self._buffer.append(ch)
-            self.brailleOut.setPlainText("".join(self._buffer))
-
-            if ch in self._SEPARATORS:
-                self._num_mode = False
-                self._capital_word_mode = False
-
-            self._capital_one = False
-            self._grade1_one = False
-
-        self._reset_dots()
-        self._update_preview()
-
-    def _reset_all_modes(self):
-        self._num_mode = False
-        self._capital_word_mode = False
-        self._capital_one = False
-        self._grade1_one = False
-
-    def _update_preview(self):
-        dots = self._current_dots()
-        dots_list = self._current_dots_list()
-
-        modes = []
-        if self._num_mode:
-            modes.append("№ цифры")
-        if self._capital_word_mode:
-            modes.append("⇧⇧ слово")
-        if self._capital_one:
-            modes.append("⇧ одна")
-        if self._grade1_one:
-            modes.append("G1")
-        self.modeLabel.setText(" | ".join(modes))
-
-        if not dots:
-            if self._num_mode:
-                self.previewLabel.setText("№")
-            elif self._capital_word_mode:
-                self.previewLabel.setText("⇧⇧")
-            elif self._capital_one:
-                self.previewLabel.setText("⇧")
-            elif self._grade1_one:
-                self.previewLabel.setText("G1")
-            else:
-                self.previewLabel.setText("—")
-            return
-
-        kind = self._prefix_kind(dots_list)
-        if kind is not None:
-            self.previewLabel.setText(
-                {
-                    "num": "№",
-                    "capital": "⇧",
-                    "capital_word": "⇧⇧",
-                    "grade1": "G1",
-                }.get(kind, "?")
+        buffer_parts = []
+        for dots in self._committed_chars:
+            buffer_parts.append(self._dots_to_braille_char(dots))
+        if self._current_dots:
+            buffer_parts.append(
+                f"[{self._dots_to_braille_char(frozenset(self._current_dots))}]"
             )
-            return
+        elif self._committed_chars:
+            buffer_parts.append("[ ]")
 
-        ch = self._char_from_dots(dots)
-        if ch is None:
-            self.previewLabel.setText("?")
+        self.buffer_label.setText(" ".join(buffer_parts))
+        
+    def _update_hint(self):
+        if not self._alphabet_name:
+            self.hint_label.setText("")
             return
-
-        if self._num_mode:
-            self.previewLabel.setText(f"{ch} (цифра)")
-        elif ch.isalpha() and (self._capital_word_mode or self._capital_one):
-            self.previewLabel.setText(f"{ch} (заглавная)")
+        cur = self._char_for_current()
+        if cur and cur != "?":
+            self.hint_label.setText(
+                f"Алфавит: {self._alphabet_name}   |   Текущий символ: «{cur}»"
+            )
         else:
-            self.previewLabel.setText(ch)
+            self.hint_label.setText(f"Алфавит: {self._alphabet_name}")
 
-    def _on_accept(self):
-        text = self.brailleOut.toPlainText()
-        parent = self.parent()
-        out_edit = getattr(parent, "outText", None) if parent is not None else None
-        if out_edit is not None and text:
-            out_edit.insertPlainText(text)
-        self.accept()
+    # ------------------------------------------------------------------ #
+    #  Публичные методы
+    # ------------------------------------------------------------------ #
+
+    def set_target_widget(self, widget):
+        self.target_widget = widget
+
+    def clear(self):
+        self._current_dots.clear()
+        self._committed_chars.clear()
+        self._update_button_states()
+        self._update_display()
+
+    
+class BrailleWindow(QWidget):
+    def __init__(self, target_widget, parent=None):
+        super().__init__(parent, Qt.WindowType.Window)
+        self.setWindowTitle("Ввод Брайля")
+        layout = QVBoxLayout(self)
+        self.braille = BrailleInputWidget(target_widget=target_widget, parent=self)
+        layout.addWidget(self.braille)
+        self.resize(420, 520)
 
 
 # ============================================================

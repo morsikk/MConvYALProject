@@ -32,7 +32,7 @@ DEFAULT_SETTINGS: dict = {
     "und_char_pol": "Предупреждение",  # Предупреждение | Игнорировать | Заменить
     "replacement": "?",                # Символ для замены
     "theme": "Системная",              # Системная | Светлая | Тёмная
-    "version": "v0.3alpha",             # НЕИЗМЕНЯЕМО
+    "version": "valpha.0.4",             # НЕИЗМЕНЯЕМО
 }
 
 # Глобальный словарь настроек. Заполняется load_settings() при старте.
@@ -104,17 +104,6 @@ POLICY_WARN = "Предупреждение"
 VALID_POLICIES = (POLICY_IGNORE, POLICY_REPLACE, POLICY_WARN)
 
 
-class UnknownSymbolPolicyError(Exception):
-    def __init__(self, symbol: str, alphabet_path: str | None = None) -> None:
-        self.symbol = symbol
-        self.alphabet_path = alphabet_path
-        self.message = (
-            f"Символ {symbol!r} отсутствует в алфавите "
-            f"{alphabet_path or '<неизвестно>'}."
-        )
-        super().__init__(self.message)
-
-
 class UnknownPolicy:
     __slots__ = ("mode", "replacement")
 
@@ -131,17 +120,19 @@ class UnknownPolicy:
     def current(cls) -> "UnknownPolicy":
         return cls()
 
-    def resolve(self, symbol: str, alphabet_path: str | None = None) -> str | None:
+    def resolve(self, ch: str, alphabet_path: str | None = None, partial_out: str = "") -> str | None:
         """
         Возвращает:
             - None  -> «игнорировать» (символ выбросить);
             - str   -> строка-замена (может быть пустой — это
                        осознанная замена на пустоту, но НЕ игнор).
-
-        Различие важно: "" и None теперь означают разное.
         """
+        # импорт здесь, чтобы не тянуть Exceptions на уровне модуля
+        # (Settings импортируется очень рано, из ConverterWidgets)
+        from Exceptions import UnknownSymbolPolicyError
+
         if self.mode == POLICY_IGNORE:
             return None
         if self.mode == POLICY_REPLACE:
             return self.replacement
-        raise UnknownSymbolPolicyError(symbol, alphabet_path)
+        raise UnknownSymbolPolicyError(ch, alphabet_path, partial_out)
