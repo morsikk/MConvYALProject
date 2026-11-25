@@ -41,10 +41,17 @@ from PyQt6.QtWidgets import (
     QTableWidget,
     QHeaderView,
     QTableWidgetItem,
-    QFileDialog
+    QFileDialog,
+    QStyledItemDelegate,
 )
-from PyQt6.QtCore import QSize, Qt, pyqtSignal, QUrl, QEvent
-from PyQt6.QtGui import QFont, QPalette, QColor, QKeyEvent
+from PyQt6.QtCore import QSize, Qt, pyqtSignal, QUrl, QEvent, QRegularExpression
+from PyQt6.QtGui import (
+    QFont,
+    QPalette,
+    QColor,
+    QKeyEvent,
+    QRegularExpressionValidator,
+)
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from Paths import data_path, resource_path
 from Settings import save_settings, reset_settings, SETTINGS, DEFAULT_SETTINGS
@@ -1205,6 +1212,11 @@ class SettingsDialog(QDialog):
         self.load()
 
 
+# ============================================================
+#   Кнопки и мини-плеер
+# ============================================================
+
+
 class SquareButton(QPushButton):
     """Кнопка, которая всегда квадратная, но тянется по высоте родителя."""
 
@@ -1300,17 +1312,46 @@ class MiniPlayer(QWidget):
             self.pause()
 
 
+# ============================================================
+#   Делегаты / валидаторы
+# ============================================================
+
+
+class OneCharDelegate(QStyledItemDelegate):
+    """Делегат: в ячейку можно ввести ровно 1 символ."""
+
+    def createEditor(self, parent, option, index):
+        ed = QLineEdit(parent)
+        ed.setMaxLength(1)
+        return ed
+
+    def setModelData(self, editor, model, index):
+        model.setData(index, editor.text()[:1])
+
+    def setEditorData(self, editor, index):
+        editor.setText(index.data() or "")
+
+
+class MorseCodeValidator(QRegularExpressionValidator):
+    """Разрешает только '.', '-' и '/'."""
+
+    def __init__(self, parent=None):
+        super().__init__(QRegularExpression(r"[.\-/]*"), parent)
+
+
 # ====================================================================== #
 #  Базовое окно создания алфавита                                        #
 # ====================================================================== #
+
+
 class BaseAlphabetDialog(QDialog):
     """
     Базовое окно создания/редактирования JSON-алфавита.
     Наследники задают:
-      - alphabet_type: str ("braille", "cipher", "numeral")
+      - alphabet_type: str
+      - save_subdir: str — подпапка в data_path("alphabets/...")
       - _build_meta_form(): добавляет поля meta в self.meta_form
       - _validate_meta(): проверяет meta, возвращает (ok, error)
-      - _build_value_editor(): создаёт виджет редактора значений
       - _make_row_value_editor(row): создаёт редактор значения для строки
       - _read_row_value(row) -> Any: читает значение из редактора строки
       - _write_row_value(row, value): записывает значение в редактор строки
@@ -1318,6 +1359,7 @@ class BaseAlphabetDialog(QDialog):
     """
 
     alphabet_type: str = "generic"
+    save_subdir: str = "alphabets"
     key_header: str = "Ключ"
     value_header: str = "Значение"
 
@@ -1327,6 +1369,7 @@ class BaseAlphabetDialog(QDialog):
         self.setWindowTitle(f"Создание алфавита — {self.alphabet_type}")
         self._initial = initial or {}
         self._result_data: dict | None = None
+        self._result_fullpath: str | None = None
 
         self._vbox = QVBoxLayout(self)
 
@@ -1405,7 +1448,7 @@ class BaseAlphabetDialog(QDialog):
         raise NotImplementedError
 
     # ---------- работа с таблицей ---------- #
-    def _add_row(self, key: str = "", value = None) -> int:
+    def _add_row(self, key: str = "", value=None) -> int:
         row = self.table.rowCount()
         self.table.insertRow(row)
         self.table.setItem(row, 0, QTableWidgetItem(key))
@@ -1421,22 +1464,20 @@ class BaseAlphabetDialog(QDialog):
 
     def _load_initial(self):
         if not self._initial:
-            # пустая строка для удобства
             self._add_row()
             return
         for k, v in self._initial.items():
-            if isinstance(v, dict) and "char" in v:
-                # braille-формат: {key: {"char": ..., "dots": [...]}}
-                self._add_row(k, v.get("char", ""))
-            else:
-                self._add_row(k, v)
+            self._add_row(k, v)
 
     # ---------- файл ---------- #
     def _browse_file(self):
+        start_dir = resource_path(self.save_subdir)
         path, _ = QFileDialog.getSaveFileName(
-            self, "Куда сохранить JSON", self.fileEdit.text(),
+            self, "Куда сохранить JSON",
+            os.path.join(start_dir, self.fileEdit.text()),
             "JSON (*.json)")
         if path:
+            self._result_fullpath = path
             self.fileEdit.setText(os.path.basename(path))
 
     # ---------- принятие ---------- #
@@ -1487,63 +1528,355 @@ class BaseAlphabetDialog(QDialog):
     def result_filename(self) -> str:
         return getattr(self, "_result_filename", "")
 
+    def result_fullpath(self) -> str | None:
+        return self._result_fullpath
+
 
 # ====================================================================== #
 #  Шифр / Морзе                                                          #
 # ====================================================================== #
 class CipherAlphabetDialog(BaseAlphabetDialog):
     """
-    Создание алфавита-шифра (например, Азбука Морзе).
-    Meta (обязательны): name, data. Необязательны: separator/spacer и т.п.
-    Значения — произвольные строки.
+    Создание алфавита-шифра (Морзе или шифр подстановки).
+
+    Meta:
+        name    — обязательно
+        sep     — обязательно (разделитель для A1Z26)
+        shift   — необязательно (по умолчанию 3)
+        rows    — обязательно (для Плейфера)
+        cols    — обязательно (для Плейфера)
+        filler  — обязательно (для Плейфера, должен быть среди букв)
+        aliases — необязательно (для Плейфера)
+
+    letters:
+        - Morse: {символ: "."/ "-"/ ...}
+        - Cipher: строка букв + aliases
     """
 
     alphabet_type = "cipher"
+    save_subdir = "alphabets/ciphers/alps"
     key_header = "Символ"
-    value_header = "Код"
+    value_header = "Код / Алиас"
+
+    # режим работы: "morse" или "cipher" — задаётся наследником
+    _mode = "cipher"
+
+    def __init__(self, /, parent=None, initial: dict | None = None,
+                 default_filename: str = ""):
+        super().__init__(parent, initial=initial,
+                         default_filename=default_filename)
+        # колонка 0 «Символ» — ровно один знак
+        self.table.setItemDelegateForColumn(0, OneCharDelegate(self.table))
 
     def _default_filename(self) -> str:
-        return "new_cipher.json"
+        return "new_morse.json" if self._mode == "morse" else "new_cipher.json"
+
+    # ---------- meta ----------
 
     def _build_meta_form(self):
         self.nameEdit = QLineEdit()
         self.nameEdit.setPlaceholderText("например, Английский")
         self.meta_form.addRow("name *:", self.nameEdit)
 
-        self.dataEdit = QLineEdit()
-        self.dataEdit.setPlaceholderText("например, en")
-        self.meta_form.addRow("data *:", self.dataEdit)
+        self.sepEdit = QLineEdit()
+        self.sepEdit.setPlaceholderText("например, -")
+        self.meta_form.addRow("sep *:", self.sepEdit)
 
-        self.spacerEdit = QLineEdit()
-        self.spacerEdit.setPlaceholderText("например, пробел")
-        self.meta_form.addRow("spacer:", self.spacerEdit)
+        self.shiftSpin = QSpinBox()
+        self.shiftSpin.setRange(1, 1000)
+        self.shiftSpin.setValue(3)
+        self.meta_form.addRow("shift:", self.shiftSpin)
+
+        self.rowsSpin = QSpinBox()
+        self.rowsSpin.setRange(1, 100)
+        self.rowsSpin.setValue(5)
+        self.meta_form.addRow("rows *:", self.rowsSpin)
+
+        self.colsSpin = QSpinBox()
+        self.colsSpin.setRange(1, 100)
+        self.colsSpin.setValue(5)
+        self.meta_form.addRow("cols *:", self.colsSpin)
+
+        self.fillerEdit = QLineEdit()
+        self.fillerEdit.setMaxLength(1)
+        self.fillerEdit.setPlaceholderText("например, x")
+        self.meta_form.addRow("filler *:", self.fillerEdit)
 
     def _validate_meta(self) -> tuple[bool, str]:
         if not self.nameEdit.text().strip():
             return False, "Поле name обязательно."
-        if not self.dataEdit.text().strip():
-            return False, "Поле data обязательно."
+        if not self.sepEdit.text():
+            return False, "Поле sep обязательно."
+        filler = self.fillerEdit.text().strip()
+        if self._mode == "cipher":
+            if len(filler) != 1:
+                return False, "filler должен быть одним символом."
         return True, ""
 
+    # ---------- редактор значения ----------
+
+    def _make_row_value_editor(self, row: int) -> QWidget:
+        if self._mode == "morse":
+            w = QLineEdit()
+            w.setPlaceholderText(". / -")
+            w.setValidator(MorseCodeValidator(w))
+            return w
+        # cipher: алиас (пусто = нет алиаса)
+        w = QLineEdit()
+        w.setPlaceholderText("алиас (необязательно)")
+        w.setMaxLength(1)
+        return w
+
+    def _read_row_value(self, row: int):
+        w = self.table.cellWidget(row, 1)
+        if isinstance(w, QLineEdit):
+            return w.text()
+        return ""
+
+    # ---------- сериализация ----------
+
     def _serialize(self) -> dict:
+        meta = {"name": self.nameEdit.text().strip(),
+                "sep": self.sepEdit.text()}
+        if self._mode == "morse":
+            return self._serialize_morse(meta)
+        return self._serialize_cipher(meta)
+
+    def _serialize_morse(self, meta: dict) -> dict:
+        # meta.spacer не пишем — он всегда пробел
         letters: dict = {}
+        # первая строка всегда "Пробел" -> "/"
+        letters[" "] = "/"
+        for r in range(1, self.table.rowCount()):  # с 1, т.к. 0 — пробел
+            item = self.table.item(r, 0)
+            key = item.text().strip() if item else ""
+            if not key:
+                continue
+            val = self._read_row_value(r).strip()
+            if not val:
+                raise ValueError(f"Строка {r+1}: пустой код.")
+            if not re.fullmatch(r"[.\-/]+", val):
+                raise ValueError(
+                    f"Строка {r+1}: код может содержать только '.', '-' и '/'."
+                )
+            letters[key] = val
+        return {"meta": meta, "letters": letters}
+
+    def _serialize_cipher(self, meta: dict) -> dict:
+        # meta
+        meta["shift"] = self.shiftSpin.value()
+        meta["rows"] = self.rowsSpin.value()
+        meta["cols"] = self.colsSpin.value()
+        filler = self.fillerEdit.text().strip()
+        meta["filler"] = filler
+
+        # letters: {символ: алиас|None}, но в JSON пишем строку букв + aliases
+        letters_list: list[str] = []
+        aliases: dict[str, str] = {}
+        seen: set[str] = set()
+
         for r in range(self.table.rowCount()):
             item = self.table.item(r, 0)
             key = item.text().strip() if item else ""
-            val = self._read_row_value(r)
             if not key:
-                raise ValueError(f"Строка {r+1}: пустой ключ.")
-            if val is None or val == "":
-                raise ValueError(f"Строка {r+1}: пустое значение.")
-            letters[key] = val
+                raise ValueError(f"Строка {r+1}: пустой символ.")
+            if len(key) != 1:
+                raise ValueError(
+                    f"Строка {r+1}: символ должен быть одним знаком."
+                )
+            if key in seen:
+                raise ValueError(f"Дублирующийся символ: {key!r}")
+            seen.add(key)
 
+            alias = self._read_row_value(r).strip()
+            if alias:
+                if len(alias) != 1:
+                    raise ValueError(
+                        f"Строка {r+1}: алиас должен быть одним знаком."
+                    )
+                aliases[key] = alias
+            else:
+                letters_list.append(key)
+
+        # filler должен быть среди букв (не алиасов)
+        if filler not in letters_list:
+            raise ValueError(
+                f"filler {filler!r} должен быть среди букв шифра "
+                f"(не среди алиасов)."
+            )
+
+        # проверка, что алфавит ровно помещается в таблицу
+        n_cells = len(letters_list)
+        expected = meta["rows"] * meta["cols"]
+        if n_cells != expected:
+            raise ValueError(
+                f"Число уникальных букв ({n_cells}) после применения "
+                f"алиасов не совпадает с размером таблицы "
+                f"{meta['rows']}x{meta['cols']} = {expected}."
+            )
+
+        # защита от цепочек/циклов алиасов
+        for src in aliases:
+            chain, cur = {src}, aliases[src]
+            while cur in aliases:
+                if cur in chain:
+                    raise ValueError(
+                        f"Цепочка/цикл алиасов вокруг {src!r}: "
+                        f"{' -> '.join(chain)} -> {cur}"
+                    )
+                chain.add(cur)
+                cur = aliases[cur]
+            if cur not in letters_list:
+                raise ValueError(
+                    f"Алиас {src!r} -> {cur!r}: цель отсутствует среди букв."
+                )
+
+        result = {"meta": meta, "letters": "".join(letters_list)}
+        if aliases:
+            meta["aliases"] = aliases
+        return result
+
+    # ---------- загрузка initial ----------
+
+    def _load_initial(self):
+        if not self._initial:
+            self._prepare_initial_rows()
+            return
+
+        meta = self._initial.get("meta", {})
+        self.nameEdit.setText(meta.get("name", ""))
+        self.sepEdit.setText(meta.get("sep", ""))
+        if "shift" in meta:
+            self.shiftSpin.setValue(int(meta["shift"]))
+        if "rows" in meta:
+            self.rowsSpin.setValue(int(meta["rows"]))
+        if "cols" in meta:
+            self.colsSpin.setValue(int(meta["cols"]))
+        if "filler" in meta:
+            self.fillerEdit.setText(meta["filler"])
+
+        letters = self._initial.get("letters", "")
+        aliases = meta.get("aliases", {})
+
+        if self._mode == "morse":
+            self._prepare_space_row()
+            if isinstance(letters, dict):
+                for k, v in letters.items():
+                    if k == " ":
+                        continue
+                    self._add_row(k, v)
+        else:
+            if isinstance(letters, str):
+                for ch in letters:
+                    self._add_row(ch, aliases.get(ch, ""))
+                for src, dst in aliases.items():
+                    if src not in letters:
+                        self._add_row(src, dst)
+            elif isinstance(letters, dict):
+                for k, v in letters.items():
+                    self._add_row(k, v)
+
+        if self.table.rowCount() == 0:
+            self._prepare_initial_rows()
+
+    def _prepare_space_row(self) -> None:
+        """Строка «Пробел» -> «/» (нередактируемая). Только для morse."""
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        item = QTableWidgetItem("Пробел")
+        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+        self.table.setItem(row, 0, item)
+        w = QLineEdit("/")
+        w.setReadOnly(True)
+        self.table.setCellWidget(row, 1, w)
+
+    def _prepare_initial_rows(self):
+        """Первая(ые) строка(и) по умолчанию."""
+        if self._mode == "morse":
+            self._prepare_space_row()
+        else:
+            self._add_row()
+
+    # ---------- переопределяем _on_accept ----------
+
+    def _on_accept(self):
+        if self._mode == "morse":
+            self._accept_morse()
+            return
+        super()._on_accept()
+
+    def _accept_morse(self):
+        fname = self.fileEdit.text().strip()
+        if not fname:
+            QMessageBox.warning(self, "Ошибка", "Укажите имя JSON-файла.")
+            return
+        if not fname.endswith(".json"):
+            fname += ".json"
+        if not re.fullmatch(r"[\w.\-]+\.json", fname):
+            QMessageBox.warning(self, "Ошибка",
+                                "Имя файла содержит недопустимые символы.")
+            return
+
+        try:
+            data = self._serialize()
+        except Exception as e:
+            QMessageBox.warning(self, "Ошибка", str(e))
+            return
+
+        self._result_data = data
+        self._result_filename = fname
+        self.accept()
+
+
+class MorseAlphabetDialog(CipherAlphabetDialog):
+    """Отдельный диалог для Морзе (mode='morse')."""
+    _mode = "morse"
+    alphabet_type = "morse"
+    save_subdir = "alphabets/morse"
+    key_header = "Символ"
+    value_header = "Код"
+
+    def _build_meta_form(self):
+        # Только name, всё остальное (sep, shift, rows, cols, filler) не нужно
+        self.nameEdit = QLineEdit()
+        self.nameEdit.setPlaceholderText("например, Английский")
+        self.meta_form.addRow("name *:", self.nameEdit)
+
+    def _validate_meta(self) -> tuple[bool, str]:
+        if not self.nameEdit.text().strip():
+            return False, "Поле name обязательно."
+        return True, ""
+
+    def _serialize(self) -> dict:
         meta = {
             "name": self.nameEdit.text().strip(),
-            "data": self.dataEdit.text().strip(),
+            "spacer": " ",
         }
-        if self.spacerEdit.text().strip():
-            meta["spacer"] = self.spacerEdit.text().strip()
+        # Всегда добавляем пробел -> "/"
+        letters: dict = {" ": "/"}
+        for r in range(1, self.table.rowCount()):  # с 1, т.к. 0 — пробел
+            item = self.table.item(r, 0)
+            key = item.text().strip() if item else ""
+            if not key:
+                continue
+            val = self._read_row_value(r).strip()
+            if not val:
+                raise ValueError(f"Строка {r+1}: пустой код.")
+            if not re.fullmatch(r"[.\-/]+", val):
+                raise ValueError(
+                    f"Строка {r+1}: код может содержать только '.', '-' и '/'."
+                )
+            letters[key] = val
         return {"meta": meta, "letters": letters}
+
+
+class CipherAlphaDialog(CipherAlphabetDialog):
+    """Отдельный диалог для шифров подстановки (mode='cipher')."""
+    _mode = "cipher"
+    alphabet_type = "cipher"
+    save_subdir = "alphabets/ciphers/alps"
+    key_header = "Символ"
+    value_header = "Алиас"
 
 
 # ====================================================================== #
@@ -1552,12 +1885,15 @@ class CipherAlphabetDialog(BaseAlphabetDialog):
 class NumeralAlphabetDialog(BaseAlphabetDialog):
     """
     Создание алфавита системы счисления.
-    Meta (обязательны): name, data. Значения — целые числа.
+    Meta: только name.
+    Значения (цифры) НЕ вводятся — они создаются по порядку, начиная с 0.
+    Пользователь вводит только обозначение цифры (символ).
     """
 
     alphabet_type = "numeral"
-    key_header = "Символ"
-    value_header = "Значение (int)"
+    save_subdir = "alphabets/number_systems"
+    key_header = "Обозначение"
+    value_header = "Значение"
 
     def _default_filename(self) -> str:
         return "new_numeral.json"
@@ -1567,33 +1903,42 @@ class NumeralAlphabetDialog(BaseAlphabetDialog):
         self.nameEdit.setPlaceholderText("например, Стандартный (до 36)")
         self.meta_form.addRow("name *:", self.nameEdit)
 
-        self.dataEdit = QLineEdit()
-        self.dataEdit.setPlaceholderText("например, standart")
-        self.meta_form.addRow("data *:", self.dataEdit)
-
     def _validate_meta(self) -> tuple[bool, str]:
         if not self.nameEdit.text().strip():
             return False, "Поле name обязательно."
-        if not self.dataEdit.text().strip():
-            return False, "Поле data обязательно."
         return True, ""
 
+    # ---------- значения не редактируются, а вычисляются ----------
+
     def _make_row_value_editor(self, row: int) -> QWidget:
-        spin = QSpinBox()
-        spin.setRange(0, 10_000_000)
-        return spin
+        w = QLineEdit()
+        w.setReadOnly(True)
+        return w
 
     def _read_row_value(self, row: int):
-        w = self.table.cellWidget(row, 1)
-        return w.value() if isinstance(w, QSpinBox) else 0
+        return row  # значение = порядковый номер строки
 
     def _write_row_value(self, row: int, value):
         w = self.table.cellWidget(row, 1)
-        if isinstance(w, QSpinBox):
-            try:
-                w.setValue(int(value))
-            except (TypeError, ValueError):
-                w.setValue(0)
+        if isinstance(w, QLineEdit):
+            w.setText(str(row))
+
+    # ---------- пересчёт значений при добавлении/удалении ----------
+
+    def _add_row(self, key: str = "", value=None) -> int:
+        row = super()._add_row(key, value)
+        self._refresh_values()
+        return row
+
+    def _remove_row(self):
+        super()._remove_row()
+        self._refresh_values()
+
+    def _refresh_values(self):
+        for r in range(self.table.rowCount()):
+            w = self.table.cellWidget(r, 1)
+            if isinstance(w, QLineEdit):
+                w.setText(str(r))
 
     def _serialize(self) -> dict:
         letters: dict = {}
@@ -1601,16 +1946,29 @@ class NumeralAlphabetDialog(BaseAlphabetDialog):
             item = self.table.item(r, 0)
             key = item.text().strip() if item else ""
             if not key:
-                raise ValueError(f"Строка {r+1}: пустой ключ.")
-            letters[key] = self._read_row_value(r)
+                raise ValueError(f"Строка {r+1}: пустое обозначение.")
+            letters[key] = r
 
-        meta = {
-            "name": self.nameEdit.text().strip(),
-            "data": self.dataEdit.text().strip(),
+        return {
+            "meta": {"name": self.nameEdit.text().strip()},
+            "letters": letters,
         }
-        return {"meta": meta, "letters": letters}
+
+    def _load_initial(self):
+        if not self._initial:
+            self._add_row()
+            return
+        meta = self._initial.get("meta", {})
+        self.nameEdit.setText(meta.get("name", ""))
+        letters = self._initial.get("letters", {})
+        if isinstance(letters, dict):
+            for ch, _ in sorted(letters.items(), key=lambda kv: kv[1]):
+                self._add_row(ch)
 
 
+# ====================================================================== #
+#  Брайль (оставлено как было, отдельная история)                        #
+# ====================================================================== #
 class BrailleInputWidget(QWidget):
     """
     Виджет для ввода символов Брайля.
@@ -2141,7 +2499,7 @@ class BrailleInputWidget(QWidget):
         self._update_button_states()
         self._update_display()
 
-    
+
 class BrailleWindow(QWidget):
     def __init__(self, target_widget, parent=None):
         super().__init__(parent, Qt.WindowType.Window)
@@ -2150,6 +2508,25 @@ class BrailleWindow(QWidget):
         self.braille = BrailleInputWidget(target_widget=target_widget, parent=self)
         layout.addWidget(self.braille)
         self.resize(420, 520)
+
+
+# Заглушка, если реального BrailleAlphabetDialog нет
+class BrailleAlphabetDialog(BaseAlphabetDialog):
+    alphabet_type = "braille"
+    save_subdir = "alphabets/braille"
+
+    def _build_meta_form(self):
+        self.nameEdit = QLineEdit()
+        self.meta_form.addRow("name *:", self.nameEdit)
+
+    def _validate_meta(self):
+        if not self.nameEdit.text().strip():
+            return False, "Поле name обязательно."
+        return True, ""
+
+    def _serialize(self):
+        return {"meta": {"name": self.nameEdit.text().strip()},
+                "letters": {}}
 
 
 # ============================================================

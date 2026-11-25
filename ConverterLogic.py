@@ -9,7 +9,6 @@ import wave
 from functools import partial
 from pathlib import Path
 from shutil import copy2
-from Paths import data_path
 import json
 
 from PyQt6.QtWidgets import (
@@ -29,8 +28,9 @@ from ConverterWidgets import (
     OperationForm,
     BrailleWindow,
     SettingsDialog,
-    CipherAlphabetDialog,
+    CipherAlphaDialog,
     NumeralAlphabetDialog,
+    MorseAlphabetDialog,
     get_palette,
     build_app_palette,
     build_app_qss,
@@ -58,7 +58,6 @@ from Exceptions import (  # noqa: F401
 )
 
 from Settings import (
-    SETTINGS,
     UnknownPolicy,
     POLICY_IGNORE,
     POLICY_REPLACE,
@@ -255,36 +254,32 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.morsePlayerAction.triggered.connect(self.open_morse_player)
         self.brailleInputAction.triggered.connect(self.open_braille_input)
 
-        # «Создать алфавит...» — подменю
         self.makeBrailleAction.triggered.connect(
             lambda: self.open_alphabet_dialog(BrailleAlphabetDialog)
         )
         self.makeMorseAction.triggered.connect(
-            lambda: self.open_alphabet_dialog(
-                CipherAlphabetDialog,
-                initial={
-                    "meta": {"name": "Морзе", "data": "morse", "spacer": "пробел"},
-                    "letters": {},
-                },
-                default_filename="new_morse.json",
-            )
+            lambda: self.open_alphabet_dialog(MorseAlphabetDialog)
         )
         self.makeNumSysAction.triggered.connect(
             lambda: self.open_alphabet_dialog(NumeralAlphabetDialog)
         )
         self.makeCiphersAction.triggered.connect(
-            lambda: self.open_alphabet_dialog(CipherAlphabetDialog)
+            lambda: self.open_alphabet_dialog(CipherAlphaDialog)
         )
 
-
-    def open_alphabet_dialog(
-        self,
-        dialog_cls,
-        initial: dict | None = None,
-        default_filename: str = "",
-    ) -> None:
+    def open_cipher_dialog(self):
+        dlg = CipherAlphaDialog(parent=self)
+        if dlg.exec():
+            self._save_alphabet(
+                dlg.result_data(),
+                dlg.result_filename(),
+                folder="ciphers/alps",
+                fullpath=dlg.result_fullpath(),
+            )
+        
+    def open_alphabet_dialog(self, dialog_cls) -> None:
         """Открывает диалог создания алфавита и сохраняет результат в JSON."""
-        dlg = dialog_cls(self, initial=initial, default_filename=default_filename)
+        dlg = dialog_cls(self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
@@ -293,17 +288,18 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         if not data or not fname:
             return
 
-        # Диалоги создают пользовательские алфавиты — кладём их в
-        # data_path("alphabets/..."), а не в ресурсы (ресурсы могут быть read-only).
-        subdir = {
-            "braille": "alphabets/braille",
-            "cipher": "alphabets/ciphers",
-            "numeral": "alphabets/number_systems",
-        }.get(getattr(dialog_cls, "alphabet_type", ""), "alphabets")
+        # Если пользователь выбрал путь вручную — используем его,
+        # иначе — папку по умолчанию из класса (save_subdir).
+        full = dlg.result_fullpath()
+        if full:
+            target = Path(full)
+        else:
+            subdir = getattr(dialog_cls, "save_subdir", "alphabets")
+            target_dir = Path(data_path(subdir))
+            target_dir.mkdir(parents=True, exist_ok=True)
+            target = target_dir / fname
 
-        target_dir = Path(data_path(subdir))
-        target_dir.mkdir(parents=True, exist_ok=True)
-        target = target_dir / fname
+        target.parent.mkdir(parents=True, exist_ok=True)
 
         try:
             with open(target, "w", encoding="utf-8") as fp:
@@ -414,47 +410,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             case _:
                 return ""
 
-
-    def _probe_unknown(
-        self,
-        type_ind: int,
-        f: OperationForm,
-        text: str,
-        alphabet_path: str,
-        policy: UnknownPolicy,
-    ) -> list[str]:
-        try:
-            match type_ind:
-                case 0:
-                    obj = Morse(alphabet_path, text, policy=policy)
-                case 2:
-                    params = dict(
-                        alphabet=alphabet_path,
-                        inp=text,
-                        shift=f.operSpin.value(),
-                        key=f.keyEdit.text(),
-                        policy=policy,
-                    )
-                    idx = f.operCombo.currentIndex()
-                    if not (0 <= idx < len(self.CIPHERS)):
-                        return []
-                    obj = self.CIPHERS[idx](**params)
-                case 3:
-                    obj = Braille(alphabet_path, text, policy=policy)
-                case _:
-                    return []
-            return obj._check_unknown_chars()
-        except Exception as e:
-            # Конструктор упал — не скрываем это от пользователя.
-            # Возвращаем непустой маркер, чтобы execute() показал диалог
-            # и пользователь сам решил: игнор / замена / отмена.
-            QMessageBox.warning(
-                self,
-                "Не удалось проверить алфавит",
-                f"Проверка неизвестных символов не удалась:\n{e}\n\n"
-                f"Будет использована текущая политика «{policy.mode}».",
-            )
-            return []
 
     @staticmethod
     def _alphabet_display_name(alphabet_path: str) -> str:
