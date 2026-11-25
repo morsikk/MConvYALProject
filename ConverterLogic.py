@@ -10,6 +10,7 @@ from functools import partial
 from pathlib import Path
 from shutil import copy2
 import json
+from Paths import update_alphabets, alphabet_file, data_path
 
 from PyQt6.QtWidgets import (
     QApplication,
@@ -31,11 +32,10 @@ from ConverterWidgets import (
     CipherAlphaDialog,
     NumeralAlphabetDialog,
     MorseAlphabetDialog,
+    BinaryAlphabetDialog,
     get_palette,
     build_app_palette,
     build_app_qss,
-    resource_path,
-    data_path,
     apply_theme,
     DEFAULT_SETTINGS,
     SETTINGS
@@ -266,6 +266,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.makeCiphersAction.triggered.connect(
             lambda: self.open_alphabet_dialog(CipherAlphaDialog)
         )
+        self.makeBinaryAction.triggered.connect(
+            lambda: self.open_alphabet_dialog(BinaryAlphabetDialog)
+        )
 
     def open_cipher_dialog(self):
         dlg = CipherAlphaDialog(parent=self)
@@ -307,6 +310,11 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         except OSError as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить файл:\n{e}")
             return
+        
+        # --- ОБНОВЛЕНИЕ alphabets.json ---
+        update_alphabets()
+        # --- ОБНОВЛЕНИЕ ВСЕХ КАРТОЧЕК ---
+        self._reload_all_alphabets()
 
         self.statusbar.showMessage(f"Алфавит сохранён: {target}", 5000)
 
@@ -318,7 +326,11 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.braille_window.show()
         self.braille_window.raise_()
         self.braille_window.activateWindow()
-        
+
+    def _reload_all_alphabets(self) -> None:
+        """Перечитывает alphabets.json и обновляет все карточки действий."""
+        for w in self._cards():
+            w.reload_alphabets()
 
     def _on_color_scheme_changed(self, scheme) -> None:
         if SETTINGS.get("theme", DEFAULT_SETTINGS["theme"]) != "Системная":
@@ -396,21 +408,16 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     def _alphabet_path_for(self, f: OperationForm, type_ind: int) -> str:
         match type_ind:
             case 0:
-                return resource_path(
-                    f"alphabets/morse/{f.alphabetCombo.currentData()}"
-                )
+                return alphabet_file("morse", f.alphabetCombo.currentData())
             case 2:
-                return resource_path(
-                    f"alphabets/ciphers/{f.alphabetCombo.currentData()}"
-                )
+                return alphabet_file("ciphers/alps", f.alphabetCombo.currentData())
             case 3:
-                return resource_path(
-                    f"alphabets/braille/{f.alphabetCombo.currentData()}"
-                )
-            case _:
+                return alphabet_file("braille", f.alphabetCombo.currentData())
+            case 4:
+                key = f.alphabetCombo.currentData()
+                if key.endswith(".json"):
+                    return alphabet_file("binary", key)
                 return ""
-
-
     @staticmethod
     def _alphabet_display_name(alphabet_path: str) -> str:
         if not alphabet_path:
@@ -501,6 +508,12 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                     obj = self.CIPHERS[idx](**params)
                 case 3:
                     obj = Braille(alphabet_path, text, policy=policy)
+                case 4:
+                    key = f.alphabetCombo.currentData()
+                    enc = alphabet_file("binary", key) if key.endswith(".json") else key
+                    obj = Bytes(text, enc, policy=policy)
+                    obj.set_direction(direction)
+                    return obj._check_unknown_chars()
                 case _:
                     return []
 
@@ -531,7 +544,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         if card_policy is not None:
             return card_policy, card_policy, False
 
-        if base_policy.mode != POLICY_WARN or type_ind not in (0, 2, 3):
+        if base_policy.mode != POLICY_WARN or type_ind not in (0, 2, 3, 4):
             return base_policy, card_policy, False
 
         alphabet_path = self._alphabet_path_for(f, type_ind)
@@ -629,9 +642,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         match type_ind:
             case 0:  # Морзе
                 morse = Morse(
-                    resource_path(
-                        f"alphabets/morse/{f.alphabetCombo.currentData()}"
-                    ),
+                    alphabet_file("morse", f.alphabetCombo.currentData()),
                     text,
                     policy=effective_policy,
                 )
@@ -646,10 +657,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
             case 1:  # Системы счисления
                 conv = NumberSystem(
-                    resource_path(
-                        f"alphabets/number_systems/"
-                        f"{f.alphabetCombo.currentData()}"
-                    ),
+                    alphabet_file("number_systems", f.alphabetCombo.currentData()),
                     f.inpSpin.value(),
                     f.operSpin.value(),
                     text,
@@ -658,8 +666,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
             case 2:  # Шифры
                 params = {
-                    "alphabet": resource_path(
-                        f"alphabets/ciphers/{f.alphabetCombo.currentData()}"
+                    "alphabet": alphabet_file(
+                        "ciphers/alps", f.alphabetCombo.currentData()
                     ),
                     "inp": text,
                     "shift": f.operSpin.value(),
@@ -674,16 +682,16 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
             case 3:  # Брайль
                 braille = Braille(
-                    resource_path(
-                        f"alphabets/braille/{f.alphabetCombo.currentData()}"
-                    ),
+                    alphabet_file("braille", f.alphabetCombo.currentData()),
                     text,
                     policy=effective_policy,
                 )
                 return braille.code() if code_radio else braille.encode()
 
-            case 4:  # Бинарный код
-                binary = Bytes(text, f.alphabetCombo.currentData())  # "utf-8" / "utf-16"
+            case 4:
+                key = f.alphabetCombo.currentData()
+                enc = alphabet_file("binary", key) if key.endswith(".json") else key
+                binary = Bytes(text, enc, policy=effective_policy)
                 return binary.code() if code_radio else binary.encode()
 
     # --------------------------------------------------------

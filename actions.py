@@ -752,50 +752,211 @@ class Braille(_OperIsCode):
 #   Bytes
 # ============================================================
 
-class Bytes(Action):
-    """Текст <-> битовая строка в заданной кодировке."""
+# ============================================================
+#   Bytes
+# ============================================================
+
+class Bytes(AlphabetAction):
+    """Текст <-> битовая строка. Стандартные кодировки и кастомные
+    алфавиты из alphabets/binary (символ <-> фиксированное число байт)."""
 
     BYTE_SEP: str = " "
 
-    def __init__(self, inp: str, enc: str = "utf-8") -> None:
-        # у Bytes нет JSON-алфавита — заполняем поля базового Action сами
-        self.alphabet_path: str | None = None
-        self.alphabet: dict | None = None
+    def __init__(
+        self,
+        inp: str,
+        enc: str = "utf-8",
+        policy: UnknownPolicy | None = None,
+    ) -> None:
         self.inp = inp
         self.enc = enc
         self.out: list[str] = []
+        self.alphabet_path: str | None = None
+        self.alphabet: dict | None = None
 
-        try:
-            "".encode(self.enc)
-        except LookupError:
-            raise exs.ActionError(f"Неизвестная кодировка: {self.enc!r}")
+        self._custom = False
+        self._char_to_code: dict[str, str] = {}
+        self._code_to_char: dict[str, str] = {}
+        self._bytes_per_char: int = 0
 
-    def _to_bytes(self) -> bytes:
+        if enc.endswith(".json"):
+            self._load_custom_alphabet(enc)
+        else:
+            try:
+                "".encode(self.enc)
+            except LookupError:
+                raise exs.ActionError(f"Неизвестная кодировка: {self.enc!r}")
+
+        self._policy = policy if policy is not None else UnknownPolicy.current()
+        self._direction = "code"
+
+    # ---------- загрузка ----------
+
+    def _load_custom_alphabet(self, path: str) -> None:
         try:
-            return self.inp.encode(self.enc)
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, json.JSONDecodeError) as exc:
+            raise exs.ActionError(f"Не удалось загрузить алфавит: {exc}")
+
+        meta = data.get("meta") or {}
+        letters = data.get("letters") or {}
+        n_bytes = meta.get("bytes")
+        if not isinstance(n_bytes, int) or n_bytes < 1:
+            raise exs.ActionError(
+                "В алфавите отсутствует или некорректно поле meta.bytes"
+            )
+
+        self._bytes_per_char = n_bytes
+        self.alphabet_path = path
+        self.alphabet = data
+
+        for ch, code in letters.items():
+            if not isinstance(code, str) or len(code) != n_bytes * 8 or any(
+                c not in "01" for c in code
+            ):
+                raise exs.ActionError(
+                    f"Код для {ch!r} должен быть строкой из {n_bytes * 8} бит (0/1)"
+                )
+            self._char_to_code[ch] = code
+            self._code_to_char[code] = ch
+
+        self._custom = True
+
+    # ---------- проверка неизвестных (code) ----------
+
+    def _casefold_match(self, ch: str) -> str | None:
+        folded = ch.casefold()
+        for k in self._char_to_code:
+            if k.casefold() == folded:
+                return k
+        return None
+
+    def _check_unknown_chars_code(self) -> list[str]:
+        unknown: list[str] = []
+        seen: set[str] = set()
+        for ch in self.inp:
+            if ch in seen:
+                continue
+            seen.add(ch)
+            if self._custom:
+                if ch not in self._char_to_code and self._casefold_match(ch) is None:
+                    unknown.append(ch)
+            else:
+                try:
+                    ch.encode(self.enc)
+                except UnicodeEncodeError:
+                    unknown.append(ch)
+        return unknown
+
+    # ---------- проверка неизвестных (encode) ----------
+
+    def _check_undecodable(self) -> list[str]:
+        bits = "".join(c for c in self.inp if c in "01")
+        unknown: list[str] = []
+        seen: set[str] = set()
+
+        if self._custom:
+            chunk_len = self._bytes_per_char * 8
+            if len(bits) % chunk_len:
+                return [bits[-(len(bits) % chunk_len):]]
+            for i in range(0, len(bits), chunk_len):
+                chunk = bits[i:i + chunk_len]
+                if chunk in seen:
+                    continue
+                seen.add(chunk)
+                if chunk not in self._code_to_char:
+                    unknown.append(chunk)
+            return unknown
+
+        if len(bits) % 8:
+            return [bits[-(len(bits) % 8):]]
+        for i in range(0, len(bits), 8):
+            byte = bits[i:i + 8]
+            if byte in seen:
+                continue
+            seen.add(byte)
+            try:
+                int(byte, 2).to_bytes(1, "big").decode(self.enc)
+            except UnicodeDecodeError:
+                unknown.append(byte)
+        return unknown
+
+    # ---------- code (текст -> биты) ----------
+
+    def _code_custom(self) -> str:
+        self._reset_output()
+        out_chunks: list[str] = []
+        for ch in self.inp:
+            code = self._char_to_code.get(ch)
+            if code is None:
+                match = self._casefold_match(ch)
+                if match is not None:
+                    code = self._char_to_code[match]
+            if code is None:
+                repl = self._resolve_unknown(
+                    ch, partial_out=self.BYTE_SEP.join(out_chunks)
+                )
+                if repl is not None:
+                    out_chunks.append(repl)
+                continue
+            
+            # --- ИЗМЕНЕНИЕ: разбиваем код на байты ---
+            # code — строка длиной N*8, разбиваем её на 8-битные куски
+            bytes_split = [code[i:i+8] for i in range(0, len(code), 8)]
+            out_chunks.extend(bytes_split) 
+            
+        return self._finish(self.BYTE_SEP.join(out_chunks))
+
+    def code(self) -> str:
+        if self._custom:
+            return self._code_custom()
+        # Стандартная кодировка: WARN не поддерживаем — кидаем ActionError
+        self._reset_output()
+        try:
+            data = self.inp.encode(self.enc)
         except UnicodeEncodeError as exc:
             raise exs.ActionError(
                 f"Не удалось закодировать текст в {self.enc!r}: {exc}"
             )
-
-    # ---------- публичные ----------
-
-    def code(self) -> str:
-        """Байты в виде '0'/'1', по 8 бит на байт, через пробел."""
-        self._reset_output()
-        data = self._to_bytes()
         return self._finish(self.BYTE_SEP.join(format(b, "08b") for b in data))
 
-    def encode(self) -> str:
-        """Битовая строка -> текст; не-битовые символы игнорируются."""
+    # ---------- encode (биты -> текст) ----------
+
+    def _encode_custom(self) -> str:
         self._reset_output()
-        bits = "".join(ch for ch in self.inp if ch in "01")
+        bits = "".join(c for c in self.inp if c in "01")
+        if not bits:
+            return self._finish("")
+        chunk_len = self._bytes_per_char * 8
+        if len(bits) % chunk_len:
+            raise exs.ActionError(
+                f"Длина битовой строки ({len(bits)}) не кратна {chunk_len} бит"
+            )
+        out_chars: list[str] = []
+        for i in range(0, len(bits), chunk_len):
+            chunk = bits[i:i + chunk_len]
+            ch = self._code_to_char.get(chunk)
+            if ch is None:
+                repl = self._resolve_unknown(chunk, partial_out="".join(out_chars))
+                if repl is not None:
+                    out_chars.append(repl)
+                continue
+            out_chars.append(ch)
+        return self._finish("".join(out_chars))
+
+    def encode(self) -> str:
+        if self._custom:
+            return self._encode_custom()
+        self._reset_output()
+        bits = "".join(c for c in self.inp if c in "01")
         if not bits:
             return self._finish("")
         if len(bits) % 8:
-            raise exs.ActionError(f"Длина битовой строки ({len(bits)}) не кратна 8")
-
-        data = bytes(int(bits[i : i + 8], 2) for i in range(0, len(bits), 8))
+            raise exs.ActionError(
+                f"Длина битовой строки ({len(bits)}) не кратна 8"
+            )
+        data = bytes(int(bits[i:i + 8], 2) for i in range(0, len(bits), 8))
         try:
             result = data.decode(self.enc)
         except UnicodeDecodeError as exc:

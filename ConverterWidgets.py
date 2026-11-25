@@ -763,6 +763,10 @@ class Ui_MainWindow(object):
         self.makeCiphersAction.setObjectName("makeCiphersAction")
         self.makeAlphabetAction.addAction(self.makeCiphersAction)
 
+        self.makeBinaryAction = QtGui.QAction("Бинарный код", parent=MainWindow)
+        self.makeBinaryAction.setObjectName("makeBinaryAction")
+        self.makeAlphabetAction.addAction(self.makeBinaryAction)
+
         self.toolsMenu = QMenu(parent=self.menubar)
         self.toolsMenu.setObjectName("toolsMenu")
         self.toolsMenu.setTitle("Инструменты")
@@ -860,9 +864,14 @@ class ActionWidget(QWidget):
 
     @classmethod
     def _load_alps(cls) -> dict:
-        """Читает единый файл alphabets.json (из упакованных ресурсов)."""
-        with open(resource_path(cls.ALPHABETS_JSON), "r", encoding="utf-8") as fp:
-            return json.load(fp)
+        """Читает alphabets.json: сначала из data_path (обновляемый),
+        потом из resource_path (упакованный)."""
+        for path in (data_path(cls.ALPHABETS_JSON),
+                    resource_path(cls.ALPHABETS_JSON)):
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as fp:
+                    return json.load(fp)
+        raise FileNotFoundError("alphabets.json не найден")
 
     @staticmethod
     def _fill_combo(combo, items: dict) -> None:
@@ -930,21 +939,24 @@ class ActionWidget(QWidget):
 
     def _update_caesar_spin_range(self) -> None:
         f = self.mFLayout
-        filename = f.alphabetCombo.currentData()  # "ru.json" / "en.json"
+        filename = f.alphabetCombo.currentData()
         n = 33
         if filename:
-            try:
-                with open(
-                    resource_path(f"alphabets/ciphers/{filename}"),
-                    "r",
-                    encoding="utf-8",
-                ) as fp:
-                    data = json.load(fp)
-                letters = data.get("letters", "")
-                if letters:
-                    n = len(letters)
-            except (FileNotFoundError, json.JSONDecodeError):
-                pass
+            path = None
+            for base in (data_path, resource_path):
+                p = base(f"alphabets/ciphers/{filename}")
+                if os.path.exists(p):
+                    path = p
+                    break
+            if path:
+                try:
+                    with open(path, "r", encoding="utf-8") as fp:
+                        data = json.load(fp)
+                    letters = data.get("letters", "")
+                    if letters:
+                        n = len(letters)
+                except (FileNotFoundError, json.JSONDecodeError):
+                    pass
         f.operSpin.setRange(1, max(1, n - 1))
         if f.operSpin.value() > n - 1:
             f.operSpin.setValue(max(1, n - 1))
@@ -964,6 +976,49 @@ class ActionWidget(QWidget):
         self.removed.emit(self)
         self.setParent(None)
         self.deleteLater()
+
+    def reload_alphabets(self) -> None:
+        """Перечитывает alphabets.json и перезаполняет комбобоксы,
+        сохраняя текущий выбор, если он ещё существует."""
+        f = self.mFLayout
+        type_ind = f.typeCombo.currentIndex()
+
+        # Сохраняем текущие выбранные ключи
+        cur_alps = f.alphabetCombo.currentData()
+        cur_oper = f.operCombo.currentData()
+
+        alps = self._load_alps()
+
+        match type_ind:
+            case 0:
+                self._fill_combo(f.alphabetCombo, alps["morse"])
+            case 1:
+                self._fill_combo(f.alphabetCombo, alps["number_systems"])
+            case 2:
+                cipher_items = {k: alps["ciphers"][k] for k in self.CIPHER_KEYS}
+                self._fill_combo(f.operCombo, cipher_items)
+                self._fill_combo(f.alphabetCombo, alps["ciphers"]["alps"])
+            case 3:
+                self._fill_combo(f.alphabetCombo, alps["braille"])
+            case 4:
+                self._fill_combo(f.alphabetCombo, alps["binary"])
+
+        # Восстанавливаем выбор, если ключ ещё существует
+        self._restore_combo_selection(f.alphabetCombo, cur_alps)
+        self._restore_combo_selection(f.operCombo, cur_oper)
+
+        # Переприменяем on_cipher_changed, чтобы скрыть/показать поля
+        if type_ind == 2:
+            self.on_cipher_changed(f.operCombo.currentIndex())
+
+
+    @staticmethod
+    def _restore_combo_selection(combo, key) -> None:
+        if key is None:
+            return
+        idx = combo.findData(key)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
 
 
 # ============================================================
@@ -1966,8 +2021,135 @@ class NumeralAlphabetDialog(BaseAlphabetDialog):
                 self._add_row(ch)
 
 
+class BinaryAlphabetDialog(BaseAlphabetDialog):
+    """Создание алфавита для бинарного кода (alphabets/binary)."""
+
+    alphabet_type = "binary"
+    save_subdir = "alphabets/binary"
+    key_header = "Символ"
+    value_header = "HEX-код"
+
+    def _default_filename(self) -> str:
+        return "new_binary.json"
+
+    def _build_meta_form(self):
+        self.nameEdit = QLineEdit()
+        self.nameEdit.setPlaceholderText("например, Свой UTF-16")
+        self.meta_form.addRow("name *:", self.nameEdit)
+
+        self.bytesSpin = QSpinBox()
+        self.bytesSpin.setRange(1, 8)
+        self.bytesSpin.setValue(1)
+        self.meta_form.addRow("bytes *:", self.bytesSpin)
+
+    def _validate_meta(self) -> tuple[bool, str]:
+        if not self.nameEdit.text().strip():
+            return False, "Поле name обязательно."
+        return True, ""
+
+    # ---------- редактор значения: HEX через пробел ----------
+
+    def _make_row_value_editor(self, row: int) -> QWidget:
+        w = QLineEdit()
+        w.setPlaceholderText("AF 7B 10")
+        # Регулярка: hex-пары через пробел, допускаем пустоту и пробелы
+        regex = QRegularExpression(
+            r"([0-9A-Fa-f]{2}( [0-9A-Fa-f]{2})*)?"
+        )
+        w.setValidator(QRegularExpressionValidator(regex, w))
+        return w
+
+    def _read_row_value(self, row: int):
+        w = self.table.cellWidget(row, 1)
+        if isinstance(w, QLineEdit):
+            return w.text().strip()
+        return ""
+
+    def _write_row_value(self, row: int, value):
+        w = self.table.cellWidget(row, 1)
+        if isinstance(w, QLineEdit):
+            w.setText("" if value is None else str(value))
+
+    # ---------- сериализация: HEX -> биты ----------
+
+    def _hex_to_bits(self, hex_str: str, n_bytes: int) -> str:
+        parts = hex_str.split()
+        if len(parts) != n_bytes:
+            raise ValueError(
+                f"Ожидалось {n_bytes} HEX-байт через пробел, "
+                f"получено {len(parts)}: {hex_str!r}"
+            )
+        bits: list[str] = []
+        for p in parts:
+            if len(p) != 2:
+                raise ValueError(
+                    f"HEX-байт {p!r} должен состоять из двух цифр"
+                )
+            try:
+                val = int(p, 16)
+            except ValueError:
+                raise ValueError(f"Некорректный HEX-байт: {p!r}")
+            bits.append(format(val, "08b"))
+        return "".join(bits)
+
+    def _serialize(self) -> dict:
+        n_bytes = self.bytesSpin.value()
+        letters: dict = {}
+        seen: set[str] = set()
+
+        for r in range(self.table.rowCount()):
+            item = self.table.item(r, 0)
+            key = item.text().strip() if item else ""
+            if not key:
+                raise ValueError(f"Строка {r+1}: пустой символ.")
+            if len(key) != 1:
+                raise ValueError(
+                    f"Строка {r+1}: символ должен быть одним знаком."
+                )
+            if key in seen:
+                raise ValueError(f"Дублирующийся символ: {key!r}")
+            seen.add(key)
+
+            hex_str = self._read_row_value(r)
+            if not hex_str:
+                raise ValueError(f"Строка {r+1}: пустой HEX-код.")
+
+            bits = self._hex_to_bits(hex_str, n_bytes)
+            if bits in letters.values():
+                raise ValueError(
+                    f"Строка {r+1}: код {hex_str!r} уже используется "
+                    f"для другого символа."
+                )
+            letters[key] = bits
+
+        return {
+            "meta": {"name": self.nameEdit.text().strip(), "bytes": n_bytes},
+            "letters": letters,
+        }
+
+    # ---------- загрузка existing ----------
+
+    def _load_initial(self):
+        if not self._initial:
+            self._add_row()
+            return
+        meta = self._initial.get("meta", {})
+        self.nameEdit.setText(meta.get("name", ""))
+        if "bytes" in meta:
+            self.bytesSpin.setValue(int(meta["bytes"]))
+
+        letters = self._initial.get("letters", {})
+        n_bytes = self.bytesSpin.value()
+        for ch, bits in letters.items():
+            # bits: строка из 0/1 длиной n_bytes*8 — конвертируем в HEX
+            hex_parts = [
+                format(int(bits[i : i + 8], 2), "02X")
+                for i in range(0, len(bits), 8)
+            ]
+            self._add_row(ch, " ".join(hex_parts))
+
 # ====================================================================== #
-#  Брайль (оставлено как было, отдельная история)                        #
+#  Брайль (!!!!!ПОЧИНИТЬ!!!!!)                                           #
 # ====================================================================== #
 class BrailleInputWidget(QWidget):
     """

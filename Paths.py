@@ -1,8 +1,3 @@
-import sys, os, json
-
-import sys, os, json
-
-
 # Шифры, которые автоматически добавляются в блок "ciphers"
 import sys, os, json
 
@@ -156,3 +151,17 @@ def data_path(relative: str) -> str:
     settings.json, temp_morse.wav и подобные пишутся в base_dir().
     """
     return os.path.join(base_dir(), *relative.split("/"))
+
+
+def alphabet_file(subdir: str, filename: str) -> str:
+    """
+    Путь к файлу алфавита: приоритет data_path (изменяемые),
+    затем resource_path (упакованные). Если ни там, ни там нет —
+    возвращает resource_path (чтобы при открытии была понятная ошибка).
+    """
+    relative = f"alphabets/{subdir}/{filename}"
+    for base in (data_path, resource_path):
+        path = base(relative)
+        if os.path.exists(path):
+            return path
+    return resource_path(relative)
