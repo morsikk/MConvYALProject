@@ -2,14 +2,10 @@
 #   ИМПОРТЫ
 # ============================================================
 
-import sys
-import math
-import struct
-import wave
+import sys, os, math, struct, wave, json
 from functools import partial
 from pathlib import Path
 from shutil import copy2
-import json
 from Paths import update_alphabets, alphabet_file, data_path
 
 from PyQt6.QtWidgets import (
@@ -22,13 +18,13 @@ from PyQt6.QtWidgets import (
     QInputDialog,
     QLineEdit
 )
-
 from ConverterWidgets import (
     Ui_MainWindow,
     ActionWidget,
     OperationForm,
     BrailleWindow,
     SettingsDialog,
+    ImportAlphabetDialog,
     CipherAlphaDialog,
     NumeralAlphabetDialog,
     MorseAlphabetDialog,
@@ -236,6 +232,66 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         dst.parent.mkdir(parents=True, exist_ok=True)
         copy2(src, dst)
 
+    def export_alphabet(self) -> None:
+        """Открывает проводник с папкой ./alphabets."""
+        folder = data_path("alphabets")
+        os.makedirs(folder, exist_ok=True)
+        # Открываем системный файловый менеджер по указанному пути
+        if sys.platform.startswith("win"):
+            os.startfile(folder)  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            os.system(f'open "{folder}"')
+        else:
+            os.system(f'xdg-open "{folder}"')
+
+    def import_alphabet(self) -> None:
+        """Импортирует выбранный JSON-алфавит в соответствующую подпапку."""
+        file_name, _ = QFileDialog.getOpenFileName(
+            self,
+            "Импортировать алфавит",
+            "",
+            "JSON Files (*.json);;All Files (*)",
+        )
+        if not file_name:
+            return
+
+        dialog = ImportAlphabetDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        subdir = dialog.result_subdir()
+        target_dir = Path(data_path(f"alphabets/{subdir}"))
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        dst = target_dir / Path(file_name).name
+
+        # Защита от случайной перезаписи
+        if dst.exists():
+            reply = QMessageBox.question(
+                self,
+                "Файл уже существует",
+                f"Файл «{dst.name}» уже есть в папке «{subdir}».\n"
+                "Перезаписать?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        try:
+            copy2(file_name, dst)
+        except OSError as e:
+            QMessageBox.critical(
+                self, "Ошибка импорта", f"Не удалось скопировать файл:\n{e}"
+            )
+            return
+
+        update_alphabets()
+        self._reload_all_alphabets()
+
+        self.statusbar.showMessage(f"Алфавит импортирован: {dst}", 5000)
+
+
     # --------------------------------------------------------
     #   Меню и диалоги
     # --------------------------------------------------------
@@ -250,6 +306,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.saveAction.triggered.connect(self.save_file)
         self.saveAsAction.triggered.connect(partial(self.save_file, saveAs=True))
         self.settingsAction.triggered.connect(self.open_settings)
+        self.exportAlphabetAction.triggered.connect(self.export_alphabet)
+        self.importAlphabetAction.triggered.connect(self.import_alphabet)
 
     def connect_tools_menu(self) -> None:
         self.morsePlayerAction.triggered.connect(self.open_morse_player)
@@ -347,9 +405,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     # --------------------------------------------------------
 
     def _generate_morse_wav(self) -> None:
-        SAMPLE_RATE = 44100
-        FREQ = 800.0
-        WPM = 25
+        SAMPLE_RATE = int(SETTINGS.get("morse_sample_rate", 44100))
+        FREQ = float(SETTINGS.get("morse_freq", 800.0))
+        WPM = float(SETTINGS.get("morse_wpm", 25)) or 25.0
         UNIT = 1.2 / WPM
 
         def tone(duration: float) -> list[float]:
@@ -359,9 +417,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         def silence(duration: float) -> list[float]:
             return [0.0] * int(SAMPLE_RATE * duration)
 
-        # Разбиваем на «символы» по пробелам, слова — по '/'
-        # Внутри символа: . = 1 unit, - = 3 unit, между элементами — 1 unit
-        # Между символами — 3 unit, между словами — 7 unit
         samples: list[float] = []
         first_word = True
 
@@ -375,15 +430,14 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
             for sym_idx, sym in enumerate(word.split()):
                 if sym_idx > 0:
-                    samples += silence(UNIT * 3)  # между символами
+                    samples += silence(UNIT * 3)
                 for elem_idx, ch in enumerate(sym):
                     if elem_idx > 0:
-                        samples += silence(UNIT * 1)  # между элементами
+                        samples += silence(UNIT * 1)
                     if ch == ".":
                         samples += tone(UNIT)
                     elif ch == "-":
                         samples += tone(UNIT * 3)
-                    # прочие символы игнорируем
 
         wav_path = data_path("temp_morse.wav")
         with wave.open(wav_path, "w") as w:

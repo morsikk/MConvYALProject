@@ -749,9 +749,20 @@ class Ui_MainWindow(object):
         self.settingsAction.setObjectName("settingsAction")
         self.settingsAction.setText("Настройки")
 
+        self.exportAlphabetAction = QtGui.QAction(parent=MainWindow)
+        self.exportAlphabetAction.setObjectName("exportAlphabetAction")
+        self.exportAlphabetAction.setText("Экспортировать алфавит")
+
+        self.importAlphabetAction = QtGui.QAction(parent=MainWindow)
+        self.importAlphabetAction.setObjectName("importAlphabetAction")
+        self.importAlphabetAction.setText("Импортировать алфавит")
+
         self.fileMenu.addAction(self.openAction)
         self.fileMenu.addAction(self.saveAction)
         self.fileMenu.addAction(self.saveAsAction)
+        self.fileMenu.addSeparator()
+        self.fileMenu.addAction(self.exportAlphabetAction)
+        self.fileMenu.addAction(self.importAlphabetAction)
         self.fileMenu.addSeparator()
         self.fileMenu.addAction(self.settingsAction)
         self.menubar.addAction(self.fileMenu.menuAction())
@@ -1165,7 +1176,7 @@ class GeneralPage(SettingsPage):
 
 
 class ConversionPage(SettingsPage):
-    """«Конвертация»: поведение при неизвестных символах."""
+    """«Конвертация»: поведение при неизвестных символах + параметры Морзе."""
 
     title = "Конвертация"
 
@@ -1176,21 +1187,38 @@ class ConversionPage(SettingsPage):
         self.undCharPolCombo.addItems(["Предупреждение", "Игнорировать", "Заменить"])
         self.add_row("Действие с неизвестным символом:", self.undCharPolCombo)
 
-        # Поле для ввода символа замены
         self.replacementEdit = QLineEdit()
         self.replacementEdit.setPlaceholderText("Символ замены...")
         self.replacementEdit.setMaxLength(10)
         self._replacement_row = self._form.rowCount()
         self.add_row("Символ замены:", self.replacementEdit)
 
-        # Показываем/скрываем поле в зависимости от выбора
         self.undCharPolCombo.currentTextChanged.connect(self._on_policy_changed)
         self._on_policy_changed(self.undCharPolCombo.currentText())
 
+        # --- Подраздел: Морзе → звук ---
+        morse_form = self.add_section("Конвертация морзе в звуковой файл")
+
+        self.morseFreqSpin = QSpinBox()
+        self.morseFreqSpin.setRange(100, 5000)          # Гц
+        self.morseFreqSpin.setSingleStep(10)
+        self.morseFreqSpin.setSuffix(" Гц")
+        morse_form.addRow("Частота звука:", self.morseFreqSpin)
+
+        self.morseRateSpin = QSpinBox()
+        self.morseRateSpin.setRange(8000, 192000)       # Гц
+        self.morseRateSpin.setSingleStep(100)
+        self.morseRateSpin.setSuffix(" Гц")
+        morse_form.addRow("Частота дискретизации:", self.morseRateSpin)
+
+        self.morseWpmSpin = QSpinBox()
+        self.morseWpmSpin.setRange(1, 100)              # слов/мин
+        self.morseWpmSpin.setSingleStep(1)
+        self.morseWpmSpin.setSuffix(" WPM")
+        morse_form.addRow("Слов в минуту:", self.morseWpmSpin)
+
     def _on_policy_changed(self, text: str) -> None:
-        """Показывает поле замены только при выборе 'Заменить'."""
         show = text == "Заменить"
-        # Находим label и widget в форме и скрываем/показываем
         label = self._form.labelForField(self.replacementEdit)
         if label is not None:
             label.setVisible(show)
@@ -1206,11 +1234,26 @@ class ConversionPage(SettingsPage):
 
         replacement = SETTINGS.get("replacement", DEFAULT_SETTINGS["replacement"])
         self.replacementEdit.setText(replacement)
-
         self._on_policy_changed(self.undCharPolCombo.currentText())
 
+        # --- Морзе ---
+        self.morseFreqSpin.setValue(
+            int(SETTINGS.get("morse_freq", DEFAULT_SETTINGS["morse_freq"]))
+        )
+        self.morseRateSpin.setValue(
+            int(SETTINGS.get("morse_sample_rate", DEFAULT_SETTINGS["morse_sample_rate"]))
+        )
+        self.morseWpmSpin.setValue(
+            int(SETTINGS.get("morse_wpm", DEFAULT_SETTINGS["morse_wpm"]))
+        )
+
     def save(self) -> dict:
-        result = {"und_char_pol": self.undCharPolCombo.currentText()}
+        result = {
+            "und_char_pol": self.undCharPolCombo.currentText(),
+            "morse_freq": self.morseFreqSpin.value(),
+            "morse_sample_rate": self.morseRateSpin.value(),
+            "morse_wpm": self.morseWpmSpin.value(),
+        }
         if self.undCharPolCombo.currentText() == "Заменить":
             result["replacement"] = self.replacementEdit.text()
         return result
@@ -1309,6 +1352,50 @@ class SettingsDialog(QDialog):
         reset_settings()
         self.load()
         _status(self, "Настройки сброшены до умолчаний", 3000)
+
+
+class ImportAlphabetDialog(QDialog):
+    """
+    Маленькое окошко для выбора типа импортируемого алфавита.
+    Возвращает имя подпапки через result_subdir().
+    """
+
+    # (отображаемое имя, имя подпапки в ./alphabets/)
+    OPTIONS = (
+        ("Морзе", "morse"),
+        ("Систем счисления", "number_systems"),
+        ("Шифров", "ciphers"),
+        ("Брайля", "braille"),
+        ("Бинарного кода", "binary"),
+    )
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Импорт алфавита")
+        self.setMinimumWidth(320)
+
+        layout = QVBoxLayout(self)
+
+        self.label = QLabel("Это алфавит для…", parent=self)
+        layout.addWidget(self.label)
+
+        self.combo = QComboBox(parent=self)
+        for text, _ in self.OPTIONS:
+            self.combo.addItem(text)
+        layout.addWidget(self.combo)
+
+        self.buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel,
+            parent=self,
+        )
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        layout.addWidget(self.buttons)
+
+    def result_subdir(self) -> str:
+        """Имя подпапки, выбранной пользователем."""
+        return self.OPTIONS[self.combo.currentIndex()][1]
 
 
 # ============================================================
