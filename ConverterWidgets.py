@@ -43,6 +43,7 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem,
     QFileDialog,
     QStyledItemDelegate,
+    QTextEdit
 )
 from PyQt6.QtCore import QSize, Qt, pyqtSignal, QUrl, QEvent, QRegularExpression
 from PyQt6.QtGui import (
@@ -2223,8 +2224,276 @@ class BinaryAlphabetDialog(BaseAlphabetDialog):
             ]
             self._add_row(ch, " ".join(hex_parts))
 
+
+class BrailleAlphabetDialog(BaseAlphabetDialog):
+    """
+    Создание алфавита Брайля.
+
+    Meta (все обязательны):
+        name                — отображаемое имя
+        num_prefix          — символ числового индикатора (Брайль)
+        capital_prefix      — символ заглавной буквы (Брайль)
+        capital_word_prefix — символ слова с заглавной (Брайль)
+
+    Таблица:
+        колонка 0 — обычный символ (один знак)
+        колонка 1 — строка Брайля (заполняется виджетом)
+
+    JSON:
+        { "meta": {...}, "prefixes": {...}, "letters": {...} }
+    """
+
+    alphabet_type = "braille"
+    save_subdir = "alphabets/braille"
+    key_header = "Символ"
+    value_header = "Брайль"
+
+    def __init__(self, /, parent=None, initial: dict | None = None,
+                 default_filename: str = ""):
+        super().__init__(parent, initial=initial,
+                         default_filename=default_filename)
+        self.table.setItemDelegateForColumn(0, OneCharDelegate(self.table))
+
+        # --- перекладываем таблицу в горизонтальный layout с виджетом ---
+        idx = self._vbox.indexOf(self.table)
+        if idx >= 0:
+            self._vbox.removeWidget(self.table)
+            h = QHBoxLayout()
+            h.setSpacing(8)
+
+            self.braille = BrailleInputWidget(
+                target_widget=None,
+                parent=self,
+                follow_focus=True,   # Enter вставляет в фокус (ячейку таблицы)
+                compact=True,
+            )
+            self.braille.setMinimumWidth(300)
+
+            right = QVBoxLayout()
+            right.setSpacing(4)
+
+            insert_btn = QPushButton("Вставить в выбранную строку")
+            insert_btn.clicked.connect(self._insert_braille_into_selected)
+            right.addWidget(insert_btn)
+            right.addWidget(self.table, 1)
+
+            h.addWidget(self.braille, 0)
+            h.addLayout(right, 1)
+            self._vbox.insertLayout(idx, h)
+
+    def _default_filename(self) -> str:
+        return "new_braille.json"
+
+    # ---------- meta ----------
+
+    def _build_meta_form(self):
+        self.nameEdit = QLineEdit()
+        self.nameEdit.setPlaceholderText("например, Английский (6-точечный)")
+        self.meta_form.addRow("name *:", self.nameEdit)
+
+        # Префиксы: read-only поле + кнопка «→ из виджета»
+        self.numPrefixEdit = self._make_prefix_row(
+            "num_prefix *:", "например, ⠼"
+        )
+        self.capPrefixEdit = self._make_prefix_row(
+            "capital_prefix *:", "например, ⠠"
+        )
+        self.capWordPrefixEdit = self._make_prefix_row(
+            "capital_word_prefix *:", "например, ⠠⠠"
+        )
+
+    def _make_prefix_row(self, label: str, placeholder: str) -> QLineEdit:
+        edit = QLineEdit()
+        edit.setReadOnly(True)
+        edit.setPlaceholderText(placeholder)
+        edit.setMaxLength(64)
+
+        btn = QPushButton("→")
+        btn.setToolTip("Взять текущий буфер виджета Брайля")
+        btn.setFixedWidth(28)
+        btn.clicked.connect(lambda: self._take_buffer_into(edit))
+
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(4)
+        row.addWidget(edit, 1)
+        row.addWidget(btn, 0)
+
+        container = QWidget()
+        container.setLayout(row)
+        self.meta_form.addRow(label, container)
+        return edit
+
+    def _take_buffer_into(self, edit: QLineEdit):
+        text = self.braille.take_buffer()
+        if not text:
+            _status(self, "Брайль: буфер пуст", 1500)
+            return
+        edit.setText(text)
+        _status(self, f"Брайль: записано {text!r}", 1500)
+
+    def _validate_meta(self) -> tuple[bool, str]:
+        if not self.nameEdit.text().strip():
+            return False, "Поле name обязательно."
+        for label, edit in (
+            ("num_prefix", self.numPrefixEdit),
+            ("capital_prefix", self.capPrefixEdit),
+            ("capital_word_prefix", self.capWordPrefixEdit),
+        ):
+            if not edit.text().strip():
+                return False, f"Поле {label} обязательно."
+            if any(not (0x2800 <= ord(ch) <= 0x28FF) for ch in edit.text()):
+                return False, (
+                    f"Поле {label} должно содержать только Брайль-символы "
+                    f"(U+2800..U+28FF)."
+                )
+        return True, ""
+
+    # ---------- редактор значения таблицы ----------
+
+    def _make_row_value_editor(self, row: int) -> QWidget:
+        w = QLineEdit()
+        w.setReadOnly(True)
+        w.setPlaceholderText("кликните и наберите Брайль / кнопка выше")
+        return w
+
+    def _read_row_value(self, row: int):
+        w = self.table.cellWidget(row, 1)
+        return w.text() if isinstance(w, QLineEdit) else ""
+
+    def _write_row_value(self, row: int, value):
+        w = self.table.cellWidget(row, 1)
+        if isinstance(w, QLineEdit):
+            w.setText("" if value is None else str(value))
+
+    def _insert_braille_into_selected(self):
+        row = self.table.currentRow()
+        if row < 0:
+            _status(self, "Брайль: выберите строку таблицы", 2000)
+            return
+        text = self.braille.take_buffer()
+        if not text:
+            _status(self, "Брайль: буфер пуст", 1500)
+            return
+        self._write_row_value(row, text)
+        _status(self, f"Брайль: код записан в строку {row + 1}", 1500)
+
+    # ---------- сериализация ----------
+
+    def _serialize(self) -> dict:
+        meta = {
+            "dots": 6,
+            "name": self.nameEdit.text().strip(),
+            "dot_index_base": 0,
+            "note": ("точка 1 -> 0, точка 2 -> 1, точка 3 -> 2, "
+                     "точка 4 -> 3, точка 5 -> 4, точка 6 -> 5"),
+        }
+
+        prefixes = {
+            "num_prefix": {
+                "char": self.numPrefixEdit.text().strip(),
+                "dots": self._braille_str_to_dots(self.numPrefixEdit.text().strip()),
+                "description": "числовой индикатор",
+            },
+            "capital_prefix": {
+                "char": self.capPrefixEdit.text().strip(),
+                "dots": self._braille_str_to_dots(self.capPrefixEdit.text().strip()),
+                "description": "индикатор заглавной буквы",
+            },
+            "capital_word_prefix": {
+                "char": self.capWordPrefixEdit.text().strip(),
+                "dots": self._braille_str_to_dots(self.capWordPrefixEdit.text().strip()),
+                "description": "индикатор слова с заглавной буквы",
+            },
+        }
+
+        letters: dict = {}
+        seen_chars: set[str] = set()
+        seen_braille: set[str] = set()
+
+        for r in range(self.table.rowCount()):
+            item = self.table.item(r, 0)
+            key = item.text().strip() if item else ""
+            if not key:
+                raise ValueError(f"Строка {r+1}: пустой символ.")
+            if len(key) != 1:
+                raise ValueError(
+                    f"Строка {r+1}: символ должен быть одним знаком."
+                )
+            if key in seen_chars:
+                raise ValueError(f"Дублирующийся символ: {key!r}")
+            seen_chars.add(key)
+
+            braille = self._read_row_value(r).strip()
+            if not braille:
+                raise ValueError(f"Строка {r+1}: пустой Брайль-код.")
+            if len(braille) != 1:
+                raise ValueError(
+                    f"Строка {r+1}: Брайль-код должен быть одним символом."
+                )
+            if any(not (0x2800 <= ord(ch) <= 0x28FF) for ch in braille):
+                raise ValueError(
+                    f"Строка {r+1}: Брайль-код должен быть символом "
+                    f"U+2800..U+28FF."
+                )
+            if braille in seen_braille:
+                raise ValueError(
+                    f"Строка {r+1}: Брайль-код {braille!r} уже используется."
+                )
+            seen_braille.add(braille)
+
+            dots = self._braille_str_to_dots(braille)
+            letters[key] = {"char": braille, "dots": dots}
+
+        return {"meta": meta, "prefixes": prefixes, "letters": letters}
+
+    @staticmethod
+    def _braille_str_to_dots(braille: str) -> list[int]:
+        """Строка Брайль-символов -> список индексов точек (0..5).
+
+        Для многоклеточных префиксов (напр. ⠠⠠) возвращает
+        конкатенацию точек каждой клетки: [5, 5].
+        """
+        result: list[int] = []
+        for ch in braille:
+            code = ord(ch)
+            if not (0x2800 <= code <= 0x28FF):
+                raise ValueError(
+                    f"Символ {ch!r} не является Брайль-символом Unicode."
+                )
+            mask = code - 0x2800
+            result.extend(i for i in range(6) if mask & (1 << i))
+        return result
+
+    # ---------- загрузка initial ----------
+
+    def _load_initial(self):
+        if not self._initial:
+            self._add_row()
+            return
+
+        meta = self._initial.get("meta", {})
+        self.nameEdit.setText(meta.get("name", ""))
+
+        prefixes = self._initial.get("prefixes", {})
+        for key, edit in (
+            ("num_prefix", self.numPrefixEdit),
+            ("capital_prefix", self.capPrefixEdit),
+            ("capital_word_prefix", self.capWordPrefixEdit),
+        ):
+            edit.setText(prefixes.get(key, {}).get("char", ""))
+
+        letters = self._initial.get("letters", {})
+        if isinstance(letters, dict):
+            for ch, info in letters.items():
+                braille = info.get("char", "") if isinstance(info, dict) else ""
+                self._add_row(ch, braille)
+
+        if self.table.rowCount() == 0:
+            self._add_row()
+
 # ====================================================================== #
-#  Брайль (!!!!!ПОЧИНИТЬ!!!!!)                                           #
+#  Брайль                                      #
 # ====================================================================== #
 class BrailleInputWidget(QWidget):
     """
@@ -2264,9 +2533,11 @@ class BrailleInputWidget(QWidget):
     # Базовый код Unicode для символов Брайля
     BRAILLE_BASE = 0x2800
 
-    def __init__(self, target_widget=None, parent=None):
+    def __init__(self, target_widget=None, parent=None, follow_focus: bool = False, compact: bool = False):
         super().__init__(parent)
         self.target_widget = target_widget
+        self.follow_focus = follow_focus
+        self.compact = compact
 
         self._current_dots = set()
         self._committed_chars = []
@@ -2304,15 +2575,20 @@ class BrailleInputWidget(QWidget):
         main_layout.setContentsMargins(8, 8, 8, 8)
         main_layout.setSpacing(8)
 
-        top_layout = QHBoxLayout()
-        top_layout.addWidget(QLabel("Алфавит Брайля:"))
-        self.alphabet_combo = QComboBox()
-        self.alphabet_combo.currentIndexChanged.connect(
-            self._on_alphabet_changed
-        )
-        top_layout.addWidget(self.alphabet_combo, 1)
-        main_layout.addLayout(top_layout)
+        # --- Верхняя строка с выбором алфавита (только в полном режиме) ---
+        self.alphabet_combo = QComboBox()  # создаём всегда: на него ссылаются методы
+        if not self.compact:
+            top_layout = QHBoxLayout()
+            top_layout.addWidget(QLabel("Алфавит Брайля:"))
+            self.alphabet_combo.currentIndexChanged.connect(
+                self._on_alphabet_changed
+            )
+            top_layout.addWidget(self.alphabet_combo, 1)
+            main_layout.addLayout(top_layout)
+        else:
+            self.alphabet_combo.setVisible(False)
 
+        # --- Дисплей ---
         self.display_frame = QFrame()
         self.display_frame.setFrameShape(QFrame.Shape.StyledPanel)
         self.display_frame.setMinimumHeight(100)
@@ -2322,27 +2598,43 @@ class BrailleInputWidget(QWidget):
         display_layout = QVBoxLayout(self.display_frame)
         display_layout.setContentsMargins(8, 8, 8, 8)
 
-        # Центральный перевод (большой) — обычный текст, без изменения цвета
-        self.center_label = QLabel("")
-        self.center_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        font = QFont()
-        font.setPointSize(28)
-        font.setBold(True)
-        self.center_label.setFont(font)
-        display_layout.addWidget(self.center_label, 1)
+        if self.compact:
+            # Центр — БРАЙЛЕВСКИЕ символы, крупно
+            self.buffer_label = QLabel("")
+            self.buffer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            buf_font = QFont("Monospace")
+            buf_font.setPointSize(28)
+            buf_font.setBold(True)
+            self.buffer_label.setFont(buf_font)
+            display_layout.addWidget(self.buffer_label, 1)
 
-        # Правый угол: текущий буфер в виде БРАЙЛЕВСКИХ символов
-        self.buffer_label = QLabel("")
-        self.buffer_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom
-        )
-        buf_font = QFont("Monospace")
-        buf_font.setPointSize(14)
-        self.buffer_label.setFont(buf_font)
-        display_layout.addWidget(self.buffer_label, 0)
+            # center_label не нужен, но на него могут ссылаться методы —
+            # создаём «пустышку» и скрываем.
+            self.center_label = QLabel("")
+            self.center_label.setVisible(False)
+            display_layout.addWidget(self.center_label, 0)
+        else:
+            # Полный режим: центр — нормальная буква, угол — Брайль
+            self.center_label = QLabel("")
+            self.center_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            font = QFont()
+            font.setPointSize(28)
+            font.setBold(True)
+            self.center_label.setFont(font)
+            display_layout.addWidget(self.center_label, 1)
+
+            self.buffer_label = QLabel("")
+            self.buffer_label.setAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom
+            )
+            buf_font = QFont("Monospace")
+            buf_font.setPointSize(14)
+            self.buffer_label.setFont(buf_font)
+            display_layout.addWidget(self.buffer_label, 0)
 
         main_layout.addWidget(self.display_frame, 1)
 
+        # --- Сетка кнопок ---
         grid = QGridLayout()
         grid.setSpacing(6)
 
@@ -2374,18 +2666,21 @@ class BrailleInputWidget(QWidget):
         grid.addWidget(back_btn, *self.BACKSPACE_BUTTON)
         self.special_buttons["backspace"] = back_btn
 
-        enter_btn = QPushButton("Enter")
-        enter_btn.setMinimumSize(60, 60)
-        enter_btn.setFont(QFont("Sans", 12, QFont.Weight.Bold))
-        enter_btn.clicked.connect(self._on_enter)
-        grid.addWidget(enter_btn, *self.ENTER_BUTTON)
-        self.special_buttons["enter"] = enter_btn
+        if not self.compact:
+            enter_btn = QPushButton("Enter")
+            enter_btn.setMinimumSize(60, 60)
+            enter_btn.setFont(QFont("Sans", 12, QFont.Weight.Bold))
+            enter_btn.clicked.connect(self._on_enter)
+            grid.addWidget(enter_btn, *self.ENTER_BUTTON)
+            self.special_buttons["enter"] = enter_btn
 
         main_layout.addLayout(grid, 0)
 
         self.hint_label = QLabel("")
         self.hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.hint_label.setWordWrap(True)
+        if self.compact:
+            self.hint_label.setVisible(False)
         main_layout.addWidget(self.hint_label)
 
     # ------------------------------------------------------------------ #
@@ -2753,11 +3048,83 @@ class BrailleInputWidget(QWidget):
             self.hint_label.setText(f"Алфавит: {self._alphabet_name}")
 
     # ------------------------------------------------------------------ #
+    #  Определение целевого виджета
+    # ------------------------------------------------------------------ #
+
+    def _resolve_target(self):
+        """Возвращает виджет, в который нужно вставить текст.
+
+        Приоритет:
+            1. Если follow_focus — текущий фокус (QLineEdit/QPlainTextEdit/QTextEdit).
+            2. Иначе — self.target_widget.
+        """
+        if self.follow_focus:
+            fw = QApplication.focusWidget()
+            if isinstance(fw, (QLineEdit, QPlainTextEdit, QTextEdit)):
+                return fw
+        return self.target_widget
+
+    def _insert_text(self, text: str) -> bool:
+        """Вставляет text в целевой виджет. Возвращает True при успехе."""
+        target = self._resolve_target()
+        if target is None:
+            return False
+        try:
+            if isinstance(target, QLineEdit):
+                target.insert(text)
+            elif isinstance(target, (QPlainTextEdit, QTextEdit)):
+                target.insertPlainText(text)
+            elif hasattr(target, "insertPlainText"):
+                target.insertPlainText(text)
+            elif hasattr(target, "insert"):
+                target.insert(text)
+            elif hasattr(target, "setText"):
+                cur = target.text() if hasattr(target, "text") else ""
+                target.setText(cur + text)
+            else:
+                return False
+            return True
+        except Exception:
+            return False
+
+    def _on_enter(self):
+        """Вставляет БРАЙЛЕВСКИЕ символы (Unicode) в целевой виджет.
+        Пустой текущий набор = пробел (U+2800), вставляется всегда."""
+        text = self._render_braille_text(include_current_always=True)
+        if not text:
+            return
+
+        if not self._insert_text(text):
+            _status(self, "Брайль: нет активного текстового поля для вставки", 2500)
+            return
+
+        self.character_committed.emit(text)
+        _status(self, "Брайль: текст вставлен в целевое поле", 2000)
+
+        self._committed_chars.clear()
+        self._current_dots.clear()
+        self._update_button_states()
+        self._update_display()
+
+    # ------------------------------------------------------------------ #
     #  Публичные методы
     # ------------------------------------------------------------------ #
 
     def set_target_widget(self, widget):
         self.target_widget = widget
+
+    def take_buffer(self) -> str:
+        """Возвращает текущий буфер Брайля и очищает его.
+
+        Используется в диалоге создания алфавита для заполнения
+        полей префиксов и ячеек таблицы.
+        """
+        text = self._render_braille_text(include_current_always=True)
+        self._committed_chars.clear()
+        self._current_dots.clear()
+        self._update_button_states()
+        self._update_display()
+        return text
 
     def clear(self):
         self._current_dots.clear()
@@ -2776,25 +3143,6 @@ class BrailleWindow(QWidget):
         layout.addWidget(self.braille)
         self.resize(420, 520)
         _status(self, "Открыто окно ввода Брайля", 2000)
-
-
-# Заглушка, если реального BrailleAlphabetDialog нет
-class BrailleAlphabetDialog(BaseAlphabetDialog):
-    alphabet_type = "braille"
-    save_subdir = "alphabets/braille"
-
-    def _build_meta_form(self):
-        self.nameEdit = QLineEdit()
-        self.meta_form.addRow("name *:", self.nameEdit)
-
-    def _validate_meta(self):
-        if not self.nameEdit.text().strip():
-            return False, "Поле name обязательно."
-        return True, ""
-
-    def _serialize(self):
-        return {"meta": {"name": self.nameEdit.text().strip()},
-                "letters": {}}
 
 
 # ============================================================

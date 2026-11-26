@@ -143,6 +143,8 @@ class AlphabetAction(Action):
         unknown: list[str] = []
         seen: set[str] = set()
         for ch in self.inp:
+            if ch.isspace():
+                continue
             if ch in seen:
                 continue
             seen.add(ch)

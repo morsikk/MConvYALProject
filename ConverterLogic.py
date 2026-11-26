@@ -33,6 +33,7 @@ from ConverterWidgets import (
     NumeralAlphabetDialog,
     MorseAlphabetDialog,
     BinaryAlphabetDialog,
+    BrailleAlphabetDialog,
     get_palette,
     build_app_palette,
     build_app_qss,
@@ -771,6 +772,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 # ============================================================
 
 if __name__ == "__main__":
+    update_alphabets()
     app = QApplication(sys.argv)
     app.setStyle("fusion")
 
