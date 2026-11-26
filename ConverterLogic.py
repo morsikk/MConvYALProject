@@ -48,6 +48,8 @@ from Actions import (
     Vigenere,
     Atbash,
     Playfair,
+    Reverse,
+    ColumnarTransposition
 )
 from Exceptions import (
     ActionError,
@@ -72,7 +74,15 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     """Главное окно приложения."""
 
     # Классы действий по индексу typeCombo — чтобы не плодить match-case
-    CIPHERS = (Caesar, Vigenere, A1Z26, Atbash, Playfair)
+    CIPHERS = (
+        Caesar,
+        Vigenere,
+        A1Z26,
+        Atbash,
+        Playfair,
+        Reverse,
+        ColumnarTransposition
+    )
 
     def __init__(self) -> None:
         super().__init__()
@@ -550,17 +560,22 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                 case 0:
                     obj = Morse(alphabet_path, text, policy=policy)
                 case 2:
+                    idx = f.operCombo.currentIndex()
+                    if not (0 <= idx < len(self.CIPHERS)):
+                        return []
+                    cipher_cls = self.CIPHERS[idx]
+                    if cipher_cls is Reverse:
+                        # алфавит не нужен, неизвестных символов нет
+                        return []
                     params = dict(
                         alphabet=alphabet_path,
                         inp=text,
                         shift=f.operSpin.value(),
                         key=f.keyEdit.text(),
+                        cols=f.operSpin.value(),
                         policy=policy,
                     )
-                    idx = f.operCombo.currentIndex()
-                    if not (0 <= idx < len(self.CIPHERS)):
-                        return []
-                    obj = self.CIPHERS[idx](**params)
+                    obj = cipher_cls(**params)
                 case 3:
                     obj = Braille(alphabet_path, text, policy=policy)
                 case 4:
@@ -720,19 +735,28 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                 return conv.oper()
 
             case 2:  # Шифры
-                params = {
-                    "alphabet": alphabet_file(
-                        "ciphers", f.alphabetCombo.currentData()
-                    ),
-                    "inp": text,
-                    "shift": f.operSpin.value(),
-                    "key": f.keyEdit.text(),
-                    "policy": effective_policy,
-                }
                 idx = f.operCombo.currentIndex()
                 if not (0 <= idx < len(self.CIPHERS)):
                     raise ActionError(f"Неверный индекс шифра: {idx}")
-                cipher = self.CIPHERS[idx](**params)
+                cipher_cls = self.CIPHERS[idx]
+
+                if cipher_cls is Reverse:
+                    # Алфавит не требуется
+                    cipher = Reverse(
+                        inp=text,
+                        policy=effective_policy,
+                    )
+                else:
+                    params = {
+                        "alphabet": alphabet_file("ciphers", f.alphabetCombo.currentData()),
+                        "inp": text,
+                        "shift": f.operSpin.value(),
+                        "key": f.keyEdit.text(),
+                        "cols": f.operSpin.value(),
+                        "policy": effective_policy,
+                    }
+                    cipher = cipher_cls(**params)
+
                 return cipher.code() if code_radio else cipher.encode()
 
             case 3:  # Брайль

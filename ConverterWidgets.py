@@ -829,7 +829,10 @@ class ActionWidget(QWidget):
     # Относительные пути (разрешаются через resource_path при обращении)
     ALPHABETS_JSON = "alphabets/alphabets.json"
 
-    CIPHER_KEYS = ["caesar", "vigenere", "A1Z26", "atbash", "playfair"]
+    CIPHER_KEYS = [
+        "caesar", "vigenere", "A1Z26", "atbash", "playfair",
+        "reverse", "columnar",
+    ]
 
     CIPHER_FIELDS = {
         "caesar": ("operCombo", "alphabetCombo", "operSpin", "direction"),
@@ -837,6 +840,8 @@ class ActionWidget(QWidget):
         "A1Z26": ("operCombo", "alphabetCombo", "direction"),
         "atbash": ("operCombo", "alphabetCombo", "direction"),
         "playfair": ("operCombo", "alphabetCombo", "keyEdit", "direction"),
+        "reverse": ("operCombo", "direction"),
+        "columnar": ("operCombo", "alphabetCombo", "operSpin", "direction"),
     }
 
     def __init__(self) -> None:
@@ -970,10 +975,19 @@ class ActionWidget(QWidget):
 
         label, _ = f._rows["operSpin"]
         if label is not None:
-            label.setText("Сдвиг:")
+            if cipher_key == "caesar":
+                label.setText("Сдвиг:")
+            elif cipher_key == "columnar":
+                label.setText("Символов в строке:")
+            else:
+                label.setText("Сдвиг:")
 
         if cipher_key == "caesar":
             self._update_caesar_spin_range()
+        elif cipher_key == "columnar":
+            f.operSpin.setRange(1, 1000)
+            if f.operSpin.value() < 1:
+                f.operSpin.setValue(1)
 
         name = f.operCombo.currentText()
         if name:

@@ -8,6 +8,8 @@ DEFAULT_CIPHERS = {
     "A1Z26":    {"name": "Шифр A1Z26"},
     "atbash":   {"name": "Шифр Атбаш"},
     "playfair": {"name": "Шифр Плейфера"},
+    "reverse":  {"name": "Переворот строки"},
+    "columnar": {"name": "Транспонирование по столбцам"},
 }
 
 # Бинарные кодировки, которые автоматически добавляются в блок "binary"
@@ -19,24 +21,14 @@ DEFAULT_BINARY = {
 
 def update_alphabets(folder_path: str = "alphabets") -> None:
     """
-    Обрабатывает папку alphabets: для каждой подпапки создаёт словарь в alphabets.json.
-
-    Формат записи для каждого файла:
-        "имя_файла.json": { "name": "значение поля meta.name из этого файла" }
-
-    Особый случай: папка 'ciphers' — файлы лежат прямо в ней (без вложенных
-    подпапок), но в alphabets.json они всё равно записываются в отдельный
-    блок "alps":
-        "ciphers": { "alps": { "файл.json": {"name": ...}, ... }, ... }
-
-    После обхода:
-      * в блок "ciphers" добавляются предустановленные шифры из DEFAULT_CIPHERS;
-      * создаётся/обновляется блок "binary" с DEFAULT_BINARY.
+    Синхронизирует alphabets.json с реальными файлами в папке alphabets.
+    Удаляет записи об удалённых файлах.
+    Гарантирует наличие DEFAULT_CIPHERS и DEFAULT_BINARY.
     """
     base_path = resource_path(folder_path)
     alphabets_json_path = data_path(f"{folder_path}/alphabets.json")
 
-    # Загружаем существующий alphabets.json или создаём пустой
+    # Загружаем существующий alphabets.json (или пустой)
     if os.path.exists(alphabets_json_path):
         with open(alphabets_json_path, "r", encoding="utf-8") as f:
             alphabets_data = json.load(f)
@@ -49,26 +41,32 @@ def update_alphabets(folder_path: str = "alphabets") -> None:
         if not os.path.isdir(subfolder):
             continue
 
+        # Собираем актуальные json-файлы с диска
+        disk_entries = _collect_entries_from_json(subfolder)
+
         if entry == "ciphers":
-            # Особый случай: файлы лежат прямо в ciphers/, но пишем в "alps"
-            alps_entries = _collect_entries_from_json(subfolder)
-            alphabets_data["ciphers"] = {"alps": alps_entries}
-            print(f"✓ Обработана папка 'ciphers' -> alps: "
-                  f"{len(alps_entries)} файлов")
+            # Для шифров: alps берем с диска, остальное (caesar, vigenere...)
+            # принудительно ставим из DEFAULT_CIPHERS
+            ciphers_block = alphabets_data.get("ciphers", {})
+            if not isinstance(ciphers_block, dict):
+                ciphers_block = {}
+            
+            # 1. Обновляем alps (полностью заменяем на то, что на диске)
+            ciphers_block["alps"] = disk_entries
+            
+            # 2. Принудительно восстанавливаем дефолтные шифры
+            ciphers_block.update(DEFAULT_CIPHERS)
+            
+            alphabets_data["ciphers"] = ciphers_block
+            print(f"✓ Обработана папка 'ciphers' -> alps: {len(disk_entries)} файлов")
         else:
-            # Обычная папка: { "файл.json": {"name": ...}, ... }
-            alphabets_data[entry] = _collect_entries_from_json(subfolder)
-            print(f"✓ Обработана папка '{entry}': "
-                  f"{len(alphabets_data[entry])} файлов")
+            # Для обычных папок (morse, braille, binary, number_systems)
+            # Полностью заменяем блок. Удалённые файлы исчезнут.
+            alphabets_data[entry] = disk_entries
+            print(f"✓ Обработана папка '{entry}': {len(disk_entries)} файлов")
 
-    # Автоматически добавляем/перезаписываем предустановленные шифры
-    ciphers_block = alphabets_data.get("ciphers", {})
-    if not isinstance(ciphers_block, dict):
-        ciphers_block = {}
-    ciphers_block.update(DEFAULT_CIPHERS)
-    alphabets_data["ciphers"] = ciphers_block
-
-    # Автоматически создаём/обновляем блок binary
+    # --- ГАРАНТИЯ НАЛИЧИЯ БАЗОВЫХ КОДИРОВОК ---
+    # Блок binary (utf-8, utf-16) должен быть всегда, даже если папки binary нет на диске
     binary_block = alphabets_data.get("binary", {})
     if not isinstance(binary_block, dict):
         binary_block = {}

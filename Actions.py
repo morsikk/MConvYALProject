@@ -1593,3 +1593,157 @@ class Playfair(_OperIsCode):
 
     def encode(self) -> str:
         return self._run(-1)
+
+
+# ============================================================
+#   Reverse — переворот строки
+# ============================================================
+
+class Reverse(_OperIsCode):
+    """
+    Переворот строки задом наперёд (инволюция: code == encode).
+
+    Алфавит не требуется: работаем с любыми символами как есть.
+    Пробелы и прочие символы сохраняются, меняется только порядок.
+    """
+
+    def __init__(
+        self,
+        inp: str,
+        enc: str = "utf-8",
+        policy: UnknownPolicy | None = None,
+        **kwargs: object,
+    ) -> None:
+        # Не вызываем super().__init__(): он грузит алфавит.
+        self.inp = inp
+        self.out: list[str] = []
+        self._policy = policy if policy is not None else UnknownPolicy.current()
+        self._direction = "code"
+
+    def _convert(self) -> str:
+        self._reset_output()
+        return self._finish(self.inp[::-1])
+
+    def code(self) -> str:
+        return self._convert()
+
+    def encode(self) -> str:
+        return self._convert()
+
+    # Неизвестных символов нет по определению
+    def _check_unknown_chars(self) -> list[str]:
+        return []
+
+
+# ============================================================
+#   ColumnarTransposition — транспонирование по столбцам
+# ============================================================
+
+class ColumnarTransposition(_OperIsCode):
+    """
+    Транспонирование по столбцам (columnar transposition).
+
+    Алфавит задаёт набор допустимых символов; всё, чего в нём нет,
+    обрабатывается политикой неизвестных символов (как в Caesar/Atbash).
+
+    Количество символов в строке таблицы (ширина) берётся из operSpin.
+    Хвост последней строки при кодировании дополняется пробелами,
+    при декодировании — обрезается по исходной длине.
+
+    Работает с произвольным алфавитом (в т.ч. многосимвольными ключами
+    letters, если они заданы списком/строкой).
+    """
+
+    def __init__(
+        self,
+        alphabet: str,
+        inp: str,
+        cols: int,
+        enc: str = "utf-8",
+        policy: UnknownPolicy | None = None,
+        **kwargs: object,
+    ) -> None:
+        super().__init__(alphabet, inp, enc, policy=policy)
+        self._require_str_letters()
+
+        if cols < 1:
+            raise exs.ActionError(
+                f"Ширина таблицы должна быть >= 1 (получено {cols})"
+            )
+        self.cols = int(cols)
+
+    # ---------- вспомогательное ----------
+
+    def _known_char(self, ch: str) -> bool:
+        return self._find_index(ch) is not None
+
+    def _rows(self, length: int) -> int:
+        return (length + self.cols - 1) // self.cols
+
+    # ---------- кодирование ----------
+
+    def code(self) -> str:
+        self._reset_output()
+        if not self.inp:
+            return self._finish("")
+
+        # 1) отфильтровать/заменить неизвестные по политике
+        chars: list[str] = []
+        for ch in self.inp:
+            if self._known_char(ch):
+                chars.append(ch)
+                continue
+            repl = self._resolve_unknown(ch, partial_out="".join(chars))
+            if repl:
+                chars.extend(repl)
+
+        if not chars:
+            return self._finish("")
+
+        # 2) дополнить до полной прямоугольной матрицы
+        rows = self._rows(len(chars))
+        total = rows * self.cols
+        padded = chars + [" "] * (total - len(chars))
+
+        # 3) читаем по столбцам
+        out: list[str] = []
+        for c in range(self.cols):
+            for r in range(rows):
+                out.append(padded[r * self.cols + c])
+
+        return self._finish("".join(out))
+
+    # ---------- декодирование ----------
+
+    def encode(self) -> str:
+        self._reset_output()
+        if not self.inp:
+            return self._finish("")
+
+        # 1) отфильтровать/заменить неизвестные по политике
+        chars: list[str] = []
+        for ch in self.inp:
+            if self._known_char(ch):
+                chars.append(ch)
+                continue
+            repl = self._resolve_unknown(ch, partial_out="".join(chars))
+            if repl:
+                chars.extend(repl)
+
+        if not chars:
+            return self._finish("")
+
+        rows = self._rows(len(chars))
+        total = rows * self.cols
+        if len(chars) < total:
+            # добиваем тем же символом, что и при кодировании (пробел)
+            # — иначе восстановление невозможно
+            chars = chars + [" "] * (total - len(chars))
+
+        # 2) обратное чтение: столбцы -> строки
+        out: list[str] = []
+        for r in range(rows):
+            for c in range(self.cols):
+                out.append(chars[c * rows + r])
+
+        return self._finish("".join(out))
