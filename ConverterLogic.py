@@ -52,7 +52,7 @@ from Actions import (
     Atbash,
     Playfair,
 )
-from Exceptions import (  # noqa: F401
+from Exceptions import (
     ActionError,
     UnknownSymbolPolicyError
 )
@@ -276,7 +276,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             self._save_alphabet(
                 dlg.result_data(),
                 dlg.result_filename(),
-                folder="ciphers/alps",
+                folder="ciphers",
                 fullpath=dlg.result_fullpath(),
             )
         
@@ -410,7 +410,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             case 0:
                 return alphabet_file("morse", f.alphabetCombo.currentData())
             case 2:
-                return alphabet_file("ciphers/alps", f.alphabetCombo.currentData())
+                return alphabet_file("ciphers", f.alphabetCombo.currentData())
             case 3:
                 return alphabet_file("braille", f.alphabetCombo.currentData())
             case 4:
@@ -667,7 +667,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             case 2:  # Шифры
                 params = {
                     "alphabet": alphabet_file(
-                        "ciphers/alps", f.alphabetCombo.currentData()
+                        "ciphers", f.alphabetCombo.currentData()
                     ),
                     "inp": text,
                     "shift": f.operSpin.value(),

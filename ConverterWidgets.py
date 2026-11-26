@@ -495,6 +495,26 @@ def apply_theme() -> None:
 
 
 # ============================================================
+#   Хелперы для statusbar
+# ============================================================
+
+
+def _status(widget: QWidget, message: str, timeout_ms: int = 0) -> None:
+    """
+    Показывает сообщение в статусбаре главного окна, если он существует.
+    Безопасно вызывается из любого виджета/диалога.
+    """
+    if widget is None:
+        return
+    win = widget.window()
+    if win is None:
+        return
+    sb = win.statusBar() if hasattr(win, "statusBar") else None
+    if sb is not None:
+        sb.showMessage(message, timeout_ms)
+
+
+# ============================================================
 #   OperationForm — форма параметров операции
 # ============================================================
 
@@ -776,6 +796,9 @@ class Ui_MainWindow(object):
         self.toolsMenu.addMenu(self.makeAlphabetAction)
         self.menubar.addAction(self.toolsMenu.menuAction())
 
+        # Приветственное сообщение в статусбаре
+        self.statusbar.showMessage("Готово", 3000)
+
 
 # ============================================================
 #   ActionWidget — карточка одного действия
@@ -889,6 +912,8 @@ class ActionWidget(QWidget):
             return
         if f.operCombo.currentIndex() == 0:
             self._update_caesar_spin_range()
+        name = f.alphabetCombo.currentText()
+        _status(self, f"Алфавит: {name}", 2000)
 
     def on_type_changed(self, index: int) -> None:
         f = self.mFLayout
@@ -898,7 +923,7 @@ class ActionWidget(QWidget):
             case 0:
                 f.show_only("alphabetCombo", "direction")
                 self._fill_combo(f.alphabetCombo, alps["morse"])
-
+                _status(self, "Тип операции: Морзе", 2000)
             case 1:
                 f.show_only("inpSpin", "operSpin", "alphabetCombo")
                 label, _ = f._rows["operSpin"]
@@ -907,20 +932,21 @@ class ActionWidget(QWidget):
                 f.inpSpin.setRange(2, 36)
                 f.operSpin.setRange(2, 36)
                 self._fill_combo(f.alphabetCombo, alps["number_systems"])
-
+                _status(self, "Тип операции: Системы счисления", 2000)
             case 2:
                 cipher_items = {k: alps["ciphers"][k] for k in self.CIPHER_KEYS}
                 self._fill_combo(f.operCombo, cipher_items)
                 self._fill_combo(f.alphabetCombo, alps["ciphers"]["alps"])
                 self.on_cipher_changed(f.operCombo.currentIndex())
-
+                _status(self, "Тип операции: Шифры", 2000)
             case 3:
                 f.show_only("alphabetCombo", "direction")
                 self._fill_combo(f.alphabetCombo, alps["braille"])
-
+                _status(self, "Тип операции: Брайль", 2000)
             case 4:
                 f.show_only("alphabetCombo", "direction")
                 self._fill_combo(f.alphabetCombo, alps["binary"])
+                _status(self, "Тип операции: Бинарный код", 2000)
 
     def on_cipher_changed(self, index: int) -> None:
         f = self.mFLayout
@@ -936,6 +962,10 @@ class ActionWidget(QWidget):
 
         if cipher_key == "caesar":
             self._update_caesar_spin_range()
+
+        name = f.operCombo.currentText()
+        if name:
+            _status(self, f"Шифр: {name}", 2000)
 
     def _update_caesar_spin_range(self) -> None:
         f = self.mFLayout
@@ -960,6 +990,7 @@ class ActionWidget(QWidget):
         f.operSpin.setRange(1, max(1, n - 1))
         if f.operSpin.value() > n - 1:
             f.operSpin.setValue(max(1, n - 1))
+        _status(self, f"Сдвиг Цезаря: 1..{max(1, n - 1)}", 2500)
 
     # ------------------------------------------------------------------ #
     #  Прочее
@@ -973,6 +1004,7 @@ class ActionWidget(QWidget):
         self.downButton.setVisible(can_down)
 
     def delete(self) -> None:
+        _status(self, "Действие удалено", 2000)
         self.removed.emit(self)
         self.setParent(None)
         self.deleteLater()
@@ -1011,6 +1043,7 @@ class ActionWidget(QWidget):
         if type_ind == 2:
             self.on_cipher_changed(f.operCombo.currentIndex())
 
+        _status(self, "Список алфавитов обновлён", 2000)
 
     @staticmethod
     def _restore_combo_selection(combo, key) -> None:
@@ -1217,9 +1250,9 @@ class SettingsDialog(QDialog):
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Отменить")
         buttons.button(QDialogButtonBox.StandardButton.Apply).setText("Применить")
         buttons.accepted.connect(self.collect_n_close)
-        buttons.rejected.connect(self.reject)
+        buttons.rejected.connect(self._on_cancel)
         buttons.button(QDialogButtonBox.StandardButton.Apply).clicked.connect(
-            self.collect
+            self._on_apply
         )
 
         self.resetButton = QPushButton("Сбросить до умолчаний")
@@ -1256,15 +1289,25 @@ class SettingsDialog(QDialog):
             res.update(page.save())
         save_settings(res)
         apply_theme()  # мгновенно применяем тему
+        _status(self, "Настройки сохранены", 2500)
+
+    def _on_apply(self) -> None:
+        self.collect()
+
+    def _on_cancel(self) -> None:
+        _status(self, "Изменение настроек отменено", 2000)
+        self.reject()
 
     def collect_n_close(self) -> None:
         self.collect()
+        _status(self, "Настройки применены", 2500)
         self.accept()
 
     def reset_to_defaults(self) -> None:
         """Удаляет settings.json и откатывает все страницы к дефолтам."""
         reset_settings()
         self.load()
+        _status(self, "Настройки сброшены до умолчаний", 3000)
 
 
 # ============================================================
@@ -1340,11 +1383,13 @@ class MiniPlayer(QWidget):
         self.player.play()
         self.btn_play.hide()
         self.btn_pause.show()
+        _status(self, "Воспроизведение", 1500)
 
     def pause(self):
         self.player.pause()
         self.btn_pause.hide()
         self.btn_play.show()
+        _status(self, "Пауза", 1500)
 
     def reload_source(self, path: str = "temp_morse.wav"):
         """
@@ -1361,10 +1406,14 @@ class MiniPlayer(QWidget):
         self.slider.setValue(0)
         if Path(path).exists():
             self.player.setSource(QUrl.fromLocalFile(path))
+            _status(self, f"Плеер: загружен {os.path.basename(path)}", 2500)
+        else:
+            _status(self, f"Плеер: файл не найден — {os.path.basename(path)}", 3000)
 
     def on_media_status(self, status):
         if status == QMediaPlayer.MediaStatus.EndOfMedia:
             self.pause()
+            _status(self, "Воспроизведение завершено", 2000)
 
 
 # ============================================================
@@ -1457,7 +1506,7 @@ class BaseAlphabetDialog(QDialog):
 
         btn_row = QHBoxLayout()
         add_btn = QPushButton("Добавить строку")
-        add_btn.clicked.connect(self._add_row)
+        add_btn.clicked.connect(self._add_row_and_notify)
         del_btn = QPushButton("Удалить строку")
         del_btn.clicked.connect(self._remove_row)
         btn_row.addWidget(add_btn)
@@ -1470,10 +1519,12 @@ class BaseAlphabetDialog(QDialog):
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel)
         self.buttonBox.accepted.connect(self._on_accept)
-        self.buttonBox.rejected.connect(self.reject)
+        self.buttonBox.rejected.connect(self._on_reject)
         self._vbox.addWidget(self.buttonBox)
 
         self._load_initial()
+
+        _status(self, f"Создание алфавита — {self.alphabet_type}", 2500)
 
     # ---------- настройки по умолчанию (переопределяются) ---------- #
     def _default_filename(self) -> str:
@@ -1511,11 +1562,23 @@ class BaseAlphabetDialog(QDialog):
         self._write_row_value(row, value)
         return row
 
+    def _add_row_and_notify(self):
+        self._add_row()
+        _status(self, "Строка добавлена", 1500)
+
     def _remove_row(self):
         rows = sorted({i.row() for i in self.table.selectedIndexes()},
                       reverse=True)
+        if not rows:
+            _status(self, "Не выбрано ни одной строки для удаления", 2000)
+            return
         for r in rows:
             self.table.removeRow(r)
+        _status(self, f"Удалено строк: {len(rows)}", 1500)
+
+    def _on_reject(self):
+        _status(self, "Создание алфавита отменено", 2000)
+        self.reject()
 
     def _load_initial(self):
         if not self._initial:
@@ -1534,22 +1597,26 @@ class BaseAlphabetDialog(QDialog):
         if path:
             self._result_fullpath = path
             self.fileEdit.setText(os.path.basename(path))
+            _status(self, f"Выбран файл: {os.path.basename(path)}", 2500)
 
     # ---------- принятие ---------- #
     def _on_accept(self):
         ok, err = self._validate_meta()
         if not ok:
             QMessageBox.warning(self, "Ошибка", err)
+            _status(self, f"Ошибка: {err}", 3000)
             return
         fname = self.fileEdit.text().strip()
         if not fname:
             QMessageBox.warning(self, "Ошибка", "Укажите имя JSON-файла.")
+            _status(self, "Ошибка: не указано имя JSON-файла", 3000)
             return
         if not fname.endswith(".json"):
             fname += ".json"
         if not re.fullmatch(r"[\w.\-]+\.json", fname):
             QMessageBox.warning(self, "Ошибка",
                                 "Имя файла содержит недопустимые символы.")
+            _status(self, "Ошибка: недопустимые символы в имени файла", 3000)
             return
 
         # проверка на дубликаты ключей
@@ -1560,10 +1627,12 @@ class BaseAlphabetDialog(QDialog):
             if not key:
                 QMessageBox.warning(self, "Ошибка",
                                     f"Строка {r+1}: пустой ключ.")
+                _status(self, f"Ошибка: строка {r+1} — пустой ключ", 3000)
                 return
             if key in seen:
                 QMessageBox.warning(self, "Ошибка",
                                     f"Дублирующийся ключ: {key!r}")
+                _status(self, f"Ошибка: дублирующийся ключ {key!r}", 3000)
                 return
             seen.add(key)
 
@@ -1571,10 +1640,12 @@ class BaseAlphabetDialog(QDialog):
             data = self._serialize()
         except Exception as e:  # noqa: BLE001
             QMessageBox.warning(self, "Ошибка", str(e))
+            _status(self, f"Ошибка: {e}", 4000)
             return
 
         self._result_data = data
         self._result_filename = fname
+        _status(self, f"Алфавит готов к сохранению: {fname}", 3000)
         self.accept()
 
     def result_data(self) -> dict | None:
@@ -1609,7 +1680,7 @@ class CipherAlphabetDialog(BaseAlphabetDialog):
     """
 
     alphabet_type = "cipher"
-    save_subdir = "alphabets/ciphers/alps"
+    save_subdir = "alphabets/ciphers"
     key_header = "Символ"
     value_header = "Код / Алиас"
 
@@ -1864,22 +1935,26 @@ class CipherAlphabetDialog(BaseAlphabetDialog):
         fname = self.fileEdit.text().strip()
         if not fname:
             QMessageBox.warning(self, "Ошибка", "Укажите имя JSON-файла.")
+            _status(self, "Ошибка: не указано имя JSON-файла", 3000)
             return
         if not fname.endswith(".json"):
             fname += ".json"
         if not re.fullmatch(r"[\w.\-]+\.json", fname):
             QMessageBox.warning(self, "Ошибка",
                                 "Имя файла содержит недопустимые символы.")
+            _status(self, "Ошибка: недопустимые символы в имени файла", 3000)
             return
 
         try:
             data = self._serialize()
         except Exception as e:
             QMessageBox.warning(self, "Ошибка", str(e))
+            _status(self, f"Ошибка: {e}", 4000)
             return
 
         self._result_data = data
         self._result_filename = fname
+        _status(self, f"Алфавит Морзе готов: {fname}", 3000)
         self.accept()
 
 
@@ -1929,7 +2004,7 @@ class CipherAlphaDialog(CipherAlphabetDialog):
     """Отдельный диалог для шифров подстановки (mode='cipher')."""
     _mode = "cipher"
     alphabet_type = "cipher"
-    save_subdir = "alphabets/ciphers/alps"
+    save_subdir = "alphabets/ciphers"
     key_header = "Символ"
     value_header = "Алиас"
 
@@ -2334,11 +2409,13 @@ class BrailleInputWidget(QWidget):
                 self.alphabet_combo.addItem(meta.get("name", filename), filename)
         except (FileNotFoundError, json.JSONDecodeError) as exc:
             self.alphabet_combo.addItem(f"Ошибка: {exc}", None)
+            _status(self, f"Брайль: ошибка загрузки — {exc}", 4000)
         self.alphabet_combo.blockSignals(False)
 
     def _on_alphabet_changed(self, index: int):
         filename = self.alphabet_combo.currentData()
         self._load_alphabet(filename)
+        _status(self, f"Брайль: выбран алфавит «{self.alphabet_combo.currentText()}»", 2500)
 
     def _load_alphabet(self, filename):
         self._alphabet_data = {}
@@ -2359,6 +2436,7 @@ class BrailleInputWidget(QWidget):
                 data = json.load(fp)
         except (FileNotFoundError, json.JSONDecodeError) as exc:
             self.hint_label.setText(f"Не удалось загрузить {filename}: {exc}")
+            _status(self, f"Брайль: не удалось загрузить {filename}", 4000)
             self._update_display()
             return
 
@@ -2424,6 +2502,7 @@ class BrailleInputWidget(QWidget):
         self._current_dots.clear()
         self._update_button_states()
         self._update_display()
+        _status(self, f"Брайль: символ зафиксирован (буфер: {len(self._committed_chars)})", 1500)
 
     def _on_backspace(self):
         if self._current_dots:
@@ -2432,11 +2511,15 @@ class BrailleInputWidget(QWidget):
             self._reset_pending_if_prefix(frozenset(self._current_dots))
             self._current_dots.clear()
             self._update_button_states()
+            _status(self, "Брайль: текущий набор очищен", 1500)
         elif self._committed_chars:
             # Возвращаем предыдущий символ в редактируемое состояние.
             prev = self._committed_chars.pop()
             self._current_dots = set(prev)
             self._update_button_states()
+            _status(self, "Брайль: возвращён предыдущий символ", 1500)
+        else:
+            _status(self, "Брайль: нечего стирать", 1500)
         self._update_display()
 
     def _on_enter(self):
@@ -2466,6 +2549,7 @@ class BrailleInputWidget(QWidget):
                     pass
 
         self.character_committed.emit(text)
+        _status(self, "Брайль: текст вставлен в целевое поле", 2000)
 
         self._committed_chars.clear()
         self._current_dots.clear()
@@ -2680,6 +2764,7 @@ class BrailleInputWidget(QWidget):
         self._committed_chars.clear()
         self._update_button_states()
         self._update_display()
+        _status(self, "Брайль: буфер очищен", 1500)
 
 
 class BrailleWindow(QWidget):
@@ -2690,6 +2775,7 @@ class BrailleWindow(QWidget):
         self.braille = BrailleInputWidget(target_widget=target_widget, parent=self)
         layout.addWidget(self.braille)
         self.resize(420, 520)
+        _status(self, "Открыто окно ввода Брайля", 2000)
 
 
 # Заглушка, если реального BrailleAlphabetDialog нет

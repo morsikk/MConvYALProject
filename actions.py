@@ -70,6 +70,38 @@ class AlphabetAction(Action):
         self._policy = policy if policy is not None else UnknownPolicy.current()
         self._build_char_maps()
 
+    # ---------- карта символов ----------
+
+    def _build_char_maps(self) -> None:
+        """Построить карты «символ <-> индекс» из self.alphabet['letters'].
+
+        Поддерживает три формата letters:
+          - {"A": "...", "B": "..."}       — символ -> значение (dict)
+          - ["A", "B", "C"]               — просто список символов
+          - "ABC"                         — строка (как в шифрах)
+        """
+        letters = self.alphabet["letters"]
+        self._idx_to_char: list[str] = []
+        self._char_to_idx: dict[str, int] = {}
+
+        if isinstance(letters, dict):
+            items = list(letters.keys())
+        elif isinstance(letters, (list, str)):
+            items = list(letters)
+        else:
+            raise exs.InvalidAlphabetError(
+                self.alphabet_path, ["letters (объект, массив или строка)"]
+            )
+
+        for idx, ch in enumerate(items):
+            if not isinstance(ch, str) or len(ch) == 0:
+                continue
+            # первый символ побеждает при дубликатах
+            if ch in self._char_to_idx:
+                continue
+            self._char_to_idx[ch] = idx
+            self._idx_to_char.append(ch)
+
     # ---------- направление ----------
 
     def set_direction(self, direction: str) -> None:
@@ -134,6 +166,53 @@ class AlphabetAction(Action):
             if key.casefold() == folded:
                 return key
         return None
+
+    def _find_index(self, ch: str) -> int | None:
+        """Точный поиск, затем регистронезависимый."""
+        idx = self._char_to_idx.get(ch)
+        if idx is not None:
+            return idx
+        folded = ch.casefold()
+        for key, i in self._char_to_idx.items():
+            if key.casefold() == folded:
+                return i
+        return None
+
+    def _restore_case(self, source: str, target: str) -> str:
+        """Перенести регистр source на target (для одного символа)."""
+        if not source or not target:
+            return target
+        if source.isupper():
+            return target.upper()
+        if source.islower():
+            return target.lower()
+        return target
+
+    def _require_str_letters(self) -> list[str]:
+        """Проверить, что letters — плоский набор одиночных символов.
+
+        Возвращает список символов. Нужен шифрам (Caesar, Vigenere,
+        Atbash, A1Z26, Playfair), где letters обязан быть простым
+        алфавитом, а не картой «символ -> код».
+        """
+        letters = self.alphabet["letters"]
+        if isinstance(letters, dict):
+            items = list(letters.keys())
+        elif isinstance(letters, (list, str)):
+            items = list(letters)
+        else:
+            raise exs.InvalidAlphabetError(
+                self.alphabet_path, ["letters (объект, массив или строка)"]
+            )
+        if not items:
+            raise exs.ActionError("Алфавит пуст")
+        for ch in items:
+            if not isinstance(ch, str) or len(ch) != 1:
+                raise exs.ActionError(
+                    f"Алфавит должен состоять из одиночных символов, "
+                    f"встретился {ch!r}"
+                )
+        return items
 
 
 # ============================================================
@@ -530,12 +609,6 @@ class Braille(_OperIsCode):
             reverse=True,
         )
 
-    # ---------- вспомогательное ----------
-
-class Braille(_OperIsCode):
-    """Шрифт Брайля: code() — в Брайль, encode() — обратно."""
-
-    # ... __init__ без изменений ...
 
     def _check_undecodable(self) -> list[str]:
         """
@@ -747,10 +820,6 @@ class Braille(_OperIsCode):
             return self._code_to_digit[code]
         return None
 
-
-# ============================================================
-#   Bytes
-# ============================================================
 
 # ============================================================
 #   Bytes
