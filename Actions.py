@@ -163,6 +163,8 @@ class AlphabetAction(Action):
         letters = self.alphabet["letters"]
         if chunk in letters:
             return chunk
+        if getattr(self._policy, "case_sensitive", True):
+            return None
         folded = chunk.casefold()
         for key in letters:
             if key.casefold() == folded:
@@ -170,10 +172,12 @@ class AlphabetAction(Action):
         return None
 
     def _find_index(self, ch: str) -> int | None:
-        """Точный поиск, затем регистронезависимый."""
+        """Точный поиск, затем (если не регистрозависимо) регистронезависимый."""
         idx = self._char_to_idx.get(ch)
         if idx is not None:
             return idx
+        if getattr(self._policy, "case_sensitive", True):
+            return None
         folded = ch.casefold()
         for key, i in self._char_to_idx.items():
             if key.casefold() == folded:
@@ -897,6 +901,8 @@ class Bytes(AlphabetAction):
     # ---------- проверка неизвестных (code) ----------
 
     def _casefold_match(self, ch: str) -> str | None:
+        if getattr(self._policy, "case_sensitive", True):
+            return None
         folded = ch.casefold()
         for k in self._char_to_code:
             if k.casefold() == folded:
@@ -1131,6 +1137,8 @@ class A1Z26(_OperIsCode):
     def _lookup(self, ch: str) -> int | None:
         if ch in self._char_to_num:
             return self._char_to_num[ch]
+        if getattr(self._policy, "case_sensitive", True):
+            return None
         for variant in (ch.lower(), ch.upper(), ch.casefold()):
             if variant in self._char_to_num:
                 return self._char_to_num[variant]
@@ -1350,6 +1358,7 @@ class Playfair(_OperIsCode):
         super().__init__(alphabet, inp, enc, policy=policy)
         self._require_str_letters()
         meta = self.alphabet.get("meta") or {}
+        self._case_sensitive = False
 
         # размер таблицы
         try:

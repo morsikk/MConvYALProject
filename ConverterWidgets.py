@@ -43,7 +43,8 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem,
     QFileDialog,
     QStyledItemDelegate,
-    QTextEdit
+    QTextEdit,
+    QCheckBox
 )
 from PyQt6.QtCore import QSize, Qt, pyqtSignal, QUrl, QEvent, QRegularExpression
 from PyQt6.QtGui import (
@@ -1207,6 +1208,12 @@ class ConversionPage(SettingsPage):
         self._replacement_row = self._form.rowCount()
         self.add_row("Символ замены:", self.replacementEdit)
 
+        self.caseSensitiveCheck = QCheckBox("Операции чувствительны к регистру")
+        self.caseSensitiveCheck.setToolTip(
+            "Если выключено — буквы ищутся в алфавите без учёта регистра."
+        )
+        self.add_row("Регистр:", self.caseSensitiveCheck)
+
         self.undCharPolCombo.currentTextChanged.connect(self._on_policy_changed)
         self._on_policy_changed(self.undCharPolCombo.currentText())
 
@@ -1246,6 +1253,10 @@ class ConversionPage(SettingsPage):
         if idx >= 0:
             self.undCharPolCombo.setCurrentIndex(idx)
 
+        self.caseSensitiveCheck.setChecked(
+            bool(SETTINGS.get("case_sensitive", DEFAULT_SETTINGS["case_sensitive"]))
+        )
+
         replacement = SETTINGS.get("replacement", DEFAULT_SETTINGS["replacement"])
         self.replacementEdit.setText(replacement)
         self._on_policy_changed(self.undCharPolCombo.currentText())
@@ -1264,6 +1275,7 @@ class ConversionPage(SettingsPage):
     def save(self) -> dict:
         result = {
             "und_char_pol": self.undCharPolCombo.currentText(),
+            "case_sensitive": self.caseSensitiveCheck.isChecked(),
             "morse_freq": self.morseFreqSpin.value(),
             "morse_sample_rate": self.morseRateSpin.value(),
             "morse_wpm": self.morseWpmSpin.value(),
@@ -2634,11 +2646,22 @@ class BrailleInputWidget(QWidget):
     # Базовый код Unicode для символов Брайля
     BRAILLE_BASE = 0x2800
 
+    _KEY_TO_DOT = {
+        Qt.Key.Key_1: 2,   # (2,0)
+        Qt.Key.Key_2: 5,   # (2,1)
+        Qt.Key.Key_4: 1,   # (1,0)
+        Qt.Key.Key_5: 4,   # (1,1)
+        Qt.Key.Key_7: 0,   # (0,0)
+        Qt.Key.Key_8: 3,   # (0,1)
+    }
+
     def __init__(self, target_widget=None, parent=None, follow_focus: bool = False, compact: bool = False):
         super().__init__(parent)
         self.target_widget = target_widget
         self.follow_focus = follow_focus
         self.compact = compact
+
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         self._current_dots = set()
         self._committed_chars = []
@@ -2675,6 +2698,11 @@ class BrailleInputWidget(QWidget):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(8, 8, 8, 8)
         main_layout.setSpacing(8)
+
+        for (row, col), dot_idx in self.DOT_BUTTONS.items():
+            btn = QPushButton()
+            btn.setAutoDefault(False)
+            btn.setDefault(False)
 
         # --- Верхняя строка с выбором алфавита (только в полном режиме) ---
         self.alphabet_combo = QComboBox()  # создаём всегда: на него ссылаются методы
@@ -2747,6 +2775,7 @@ class BrailleInputWidget(QWidget):
             btn.setCheckable(True)
             btn.setMinimumSize(60, 60)
             btn.setFont(QFont("Sans", 22))
+            btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             btn.clicked.connect(
                 lambda checked, d=dot_idx: self._on_dot_toggled(d, checked)
             )
@@ -2756,6 +2785,7 @@ class BrailleInputWidget(QWidget):
         plus_btn = QPushButton("+")
         plus_btn.setMinimumSize(60, 60)
         plus_btn.setFont(QFont("Sans", 20, QFont.Weight.Bold))
+        plus_btn.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         plus_btn.clicked.connect(self._on_plus)
         grid.addWidget(plus_btn, *self.PLUS_BUTTON)
         self.special_buttons["plus"] = plus_btn
@@ -2763,6 +2793,7 @@ class BrailleInputWidget(QWidget):
         back_btn = QPushButton("←")
         back_btn.setMinimumSize(60, 60)
         back_btn.setFont(QFont("Sans", 18, QFont.Weight.Bold))
+        back_btn.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         back_btn.clicked.connect(self._on_backspace)
         grid.addWidget(back_btn, *self.BACKSPACE_BUTTON)
         self.special_buttons["backspace"] = back_btn
@@ -2771,6 +2802,7 @@ class BrailleInputWidget(QWidget):
             enter_btn = QPushButton("Enter")
             enter_btn.setMinimumSize(60, 60)
             enter_btn.setFont(QFont("Sans", 12, QFont.Weight.Bold))
+            enter_btn.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
             enter_btn.clicked.connect(self._on_enter)
             grid.addWidget(enter_btn, *self.ENTER_BUTTON)
             self.special_buttons["enter"] = enter_btn
@@ -2975,6 +3007,13 @@ class BrailleInputWidget(QWidget):
         if self._current_dots or include_current_always:
             chars.append(frozenset(self._current_dots))
         return "".join(self._dots_to_braille_char(d) for d in chars)
+
+    def _mk_button(self, text: str = "") -> QPushButton:
+        btn = QPushButton(text)
+        btn.setAutoDefault(False)
+        btn.setDefault(False)
+        btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)   # см. п.2
+        return btn
 
     # ------------------------------------------------------------------ #
     #  Отображение
@@ -3206,6 +3245,57 @@ class BrailleInputWidget(QWidget):
         self._current_dots.clear()
         self._update_button_states()
         self._update_display()
+
+    # ------------------------------------------------------------------ #
+    #  Ввод с клавиатуры
+    # ------------------------------------------------------------------ #
+
+    def keyPressEvent(self, event):
+        key = event.key()
+
+        if key in self._KEY_TO_DOT:
+            dot = self._KEY_TO_DOT[key]
+            if not event.isAutoRepeat():
+                # toggle: если точка уже была — убираем, иначе добавляем
+                if dot in self._current_dots:
+                    self._current_dots.discard(dot)
+                else:
+                    self._current_dots.add(dot)
+                self._update_button_states()
+                self._update_display()
+            event.accept()
+            return
+
+        if key in (Qt.Key.Key_Plus, Qt.Key.Key_Equal) and (
+            key == Qt.Key.Key_Plus or event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+        ):
+            self._on_plus()
+            event.accept()
+            return
+
+        if key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter:
+            self._on_enter()
+            event.accept()
+            return
+
+        if key == Qt.Key.Key_Backspace:
+            self._on_backspace()
+            event.accept()
+            return
+
+        if key == Qt.Key.Key_Minus:
+            self._on_backspace()
+            event.accept()
+            return
+
+        super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event):
+        # Гасим auto-repeat для точек, чтобы не дёргалось дважды
+        if event.key() in self._KEY_TO_DOT and event.isAutoRepeat():
+            event.accept()
+            return
+        super().keyReleaseEvent(event)
 
     # ------------------------------------------------------------------ #
     #  Публичные методы

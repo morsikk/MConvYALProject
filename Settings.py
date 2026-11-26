@@ -30,15 +30,16 @@ SETTINGS_FILE = data_path("settings.json")
 # повреждён или в нём нет нужного ключа.
 DEFAULT_SETTINGS: dict = {
     # ---------- ПРИЛОЖЕНИЕ ----------
-    "theme": "Системная",              # Системная | Светлая | Тёмная
+    "theme": "Системная",               # Системная | Светлая | Тёмная
     "version": "alpha.0.4",             # НЕИЗМЕНЯЕМО
     # ---------- КОНВЕРТАЦИЯ ----------
-    "und_char_pol": "Предупреждение",  # Предупреждение | Игнорировать | Заменить
-    "replacement": "?",                # Символ для замены
+    "und_char_pol": "Предупреждение",   # Предупреждение | Игнорировать | Заменить
+    "replacement": "?",                 # Символ для замены
+    "case_sensitive": False,            # Регистрозависимость
         # --- Морзе → звук ---
-    "morse_freq": 800,           # Частота звука, Гц
-    "morse_sample_rate": 44100,  # Частота дискретизации, Гц
-    "morse_wpm": 25,             # Слов в минуту
+    "morse_freq": 800,                  # Частота звука, Гц
+    "morse_sample_rate": 44100,         # Частота дискретизации, Гц
+    "morse_wpm": 25,                    # Слов в минуту
 }
 
 # Глобальный словарь настроек. Заполняется load_settings() при старте.
@@ -111,13 +112,18 @@ VALID_POLICIES = (POLICY_IGNORE, POLICY_REPLACE, POLICY_WARN)
 
 
 class UnknownPolicy:
-    __slots__ = ("mode", "replacement")
+    __slots__ = ("mode", "replacement", "case_sensitive")
 
-    def __init__(self, mode: str | None = None, replacement: str | None = None) -> None:
+    def __init__(self, mode: str | None = None, replacement: str | None = None,
+                 case_sensitive: bool | None = None) -> None:
         self.mode = mode if mode is not None else SETTINGS.get("und_char_pol", POLICY_WARN)
         self.replacement = (
             replacement if replacement is not None
             else SETTINGS.get("replacement", "")
+        )
+        self.case_sensitive = (
+            case_sensitive if case_sensitive is not None
+            else bool(SETTINGS.get("case_sensitive", False))
         )
         if self.mode not in VALID_POLICIES:
             self.mode = POLICY_WARN
