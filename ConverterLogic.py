@@ -2,66 +2,35 @@
 #   ИМПОРТЫ
 # ============================================================
 
-import sys, os, math, struct, wave, json
+import json, math, os, struct, sys, wave
 from functools import partial
 from pathlib import Path
 from shutil import copy2
-from Paths import update_alphabets, alphabet_file, data_path
 
 from PyQt6.QtWidgets import (
-    QApplication,
-    QMainWindow,
-    QDialog,
-    QFileDialog,
-    QMessageBox,
-    QLabel,
-    QInputDialog,
-    QLineEdit
-)
-from ConverterWidgets import (
-    Ui_MainWindow,
-    ActionWidget,
-    OperationForm,
-    BrailleWindow,
-    SettingsDialog,
-    ImportAlphabetDialog,
-    CipherAlphaDialog,
-    NumeralAlphabetDialog,
-    MorseAlphabetDialog,
-    BinaryAlphabetDialog,
-    BrailleAlphabetDialog,
-    get_palette,
-    build_app_palette,
-    build_app_qss,
-    apply_theme,
-    DEFAULT_SETTINGS,
-    SETTINGS
-)
-from Actions import (
-    AlphabetAction,
-    Morse,
-    NumberSystem,
-    Braille,
-    Bytes,
-    Caesar,
-    A1Z26,
-    Vigenere,
-    Atbash,
-    Playfair,
-    Reverse,
-    ColumnarTransposition
-)
-from Exceptions import (
-    ActionError,
-    UnknownSymbolPolicyError
+    QApplication, QMainWindow, QDialog, QFileDialog, QMessageBox,
+    QLabel, QInputDialog, QLineEdit,
 )
 
+from Paths import update_alphabets, alphabet_file, data_path
+
+from ConverterWidgets import (
+    Ui_MainWindow, ActionWidget, OperationForm, BrailleWindow,
+    SettingsDialog, ImportAlphabetDialog, CipherAlphaDialog,
+    NumeralAlphabetDialog, MorseAlphabetDialog, BinaryAlphabetDialog,
+    BrailleAlphabetDialog,
+    get_palette, build_app_palette, build_app_qss, apply_theme,
+    DEFAULT_SETTINGS, SETTINGS,
+)
+from Actions import (
+    AlphabetAction, Morse, NumberSystem, Braille, Bytes,
+    Caesar, A1Z26, Vigenere, Atbash, Playfair, Reverse,
+    ColumnarTransposition,
+)
+from Exceptions import ActionError, UnknownSymbolPolicyError
 from Settings import (
-    UnknownPolicy,
-    POLICY_IGNORE,
-    POLICY_REPLACE,
-    POLICY_WARN,
-    load_settings
+    UnknownPolicy, POLICY_IGNORE, POLICY_REPLACE, POLICY_WARN,
+    load_settings,
 )
 
 
@@ -69,32 +38,27 @@ from Settings import (
 #   MainWindow
 # ============================================================
 
-
 class MainWindow(QMainWindow, Ui_MainWindow):
     """Главное окно приложения."""
 
-    # Классы действий по индексу typeCombo — чтобы не плодить match-case
-    CIPHERS = (
-        Caesar,
-        Vigenere,
-        A1Z26,
-        Atbash,
-        Playfair,
-        Reverse,
-        ColumnarTransposition
+    # Классы шифров по индексу operCombo — чтобы не плодить match-case
+    CIPHERS: tuple[type, ...] = (
+        Caesar, Vigenere, A1Z26, Atbash, Playfair, Reverse,
+        ColumnarTransposition,
     )
 
     def __init__(self) -> None:
         super().__init__()
 
-        self.file_name = ""
-        self._morse_text = ""
-        self._morse_ready = False
-        self._player_used = False
+        self.file_name: str = ""
+        self._morse_text: str = ""
+        self._morse_ready: bool = False
+        self._player_used: bool = False
+        self.braille_window: BrailleWindow | None = None
 
         self.setupUi(self)
 
-        # --- Версия справа в статус-баре ---
+        # Версия справа в статусбаре
         self.versionLabel = QLabel(f"v{SETTINGS['version']}")
         self.versionLabel.setStyleSheet("padding-right: 8px;")
         self.statusbar.addPermanentWidget(self.versionLabel)
@@ -109,11 +73,11 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             self._on_color_scheme_changed
         )
 
-        # Базовые форматы; аудио добавляются в execute(), если в цепочке есть Морзе
-        self._base_formats = ["Text Files (*.txt)", "All Files (*)"]
-        self._audio_formats = ["MP3 Files (*.mp3)", "WAV Files (*.wav)"]
-        self.saveFormats = list(self._base_formats)
-        self.braille_window = None
+        # Базовые форматы; аудио добавляются в execute(), если в цепочке
+        # есть Морзе.
+        self._base_formats: list[str] = ["Text Files (*.txt)", "All Files (*)"]
+        self._audio_formats: list[str] = ["MP3 Files (*.mp3)", "WAV Files (*.wav)"]
+        self.saveFormats: list[str] = list(self._base_formats)
 
     # --------------------------------------------------------
     #   Список действий
@@ -136,16 +100,14 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     def _move_action_up(self, widget: ActionWidget) -> None:
         cards = self._cards()
         idx = cards.index(widget)
-        if idx <= 0:
-            return
-        self._swap_cards(cards, idx, idx - 1)
+        if idx > 0:
+            self._swap_cards(cards, idx, idx - 1)
 
     def _move_action_down(self, widget: ActionWidget) -> None:
         cards = self._cards()
         idx = cards.index(widget)
-        if idx < 0 or idx >= len(cards) - 1:
-            return
-        self._swap_cards(cards, idx, idx + 1)
+        if 0 <= idx < len(cards) - 1:
+            self._swap_cards(cards, idx, idx + 1)
 
     def refresh_action_numbers(self) -> None:
         cards = self._cards()
@@ -155,14 +117,16 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             w.set_move_buttons_enabled(can_up=(n > 1), can_down=(n <= last))
 
     def _cards(self) -> list[ActionWidget]:
-        result = []
+        result: list[ActionWidget] = []
         for i in range(self.actionsLayout.count()):
             w = self.actionsLayout.itemAt(i).widget()
             if isinstance(w, ActionWidget):
                 result.append(w)
         return result
 
-    def _swap_cards(self, cards: list[ActionWidget], i: int, j: int) -> None:
+    def _swap_cards(
+        self, cards: list[ActionWidget], i: int, j: int
+    ) -> None:
         cards[i], cards[j] = cards[j], cards[i]
         for w in cards:
             self.actionsLayout.removeWidget(w)
@@ -233,7 +197,6 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
         dst = Path(file_name)
         if not dst.suffix:
-            # явно, без магии индексов
             if "MP3" in selected:
                 dst = dst.with_suffix(".mp3")
             elif "WAV" in selected:
@@ -243,10 +206,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         copy2(src, dst)
 
     def export_alphabet(self) -> None:
-        """Открывает проводник с папкой ./alphabets."""
+        """Открыть системный файловый менеджер на ./alphabets."""
         folder = data_path("alphabets")
         os.makedirs(folder, exist_ok=True)
-        # Открываем системный файловый менеджер по указанному пути
         if sys.platform.startswith("win"):
             os.startfile(folder)  # type: ignore[attr-defined]
         elif sys.platform == "darwin":
@@ -255,7 +217,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             os.system(f'xdg-open "{folder}"')
 
     def import_alphabet(self) -> None:
-        """Импортирует выбранный JSON-алфавит в соответствующую подпапку."""
+        """Импортировать выбранный JSON-алфавит в подпапку по типу."""
         file_name, _ = QFileDialog.getOpenFileName(
             self,
             "Импортировать алфавит",
@@ -298,9 +260,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
         update_alphabets()
         self._reload_all_alphabets()
-
         self.statusbar.showMessage(f"Алфавит импортирован: {dst}", 5000)
-
 
     # --------------------------------------------------------
     #   Меню и диалоги
@@ -323,34 +283,19 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.morsePlayerAction.triggered.connect(self.open_morse_player)
         self.brailleInputAction.triggered.connect(self.open_braille_input)
 
-        self.makeBrailleAction.triggered.connect(
-            lambda: self.open_alphabet_dialog(BrailleAlphabetDialog)
-        )
-        self.makeMorseAction.triggered.connect(
-            lambda: self.open_alphabet_dialog(MorseAlphabetDialog)
-        )
-        self.makeNumSysAction.triggered.connect(
-            lambda: self.open_alphabet_dialog(NumeralAlphabetDialog)
-        )
-        self.makeCiphersAction.triggered.connect(
-            lambda: self.open_alphabet_dialog(CipherAlphaDialog)
-        )
-        self.makeBinaryAction.triggered.connect(
-            lambda: self.open_alphabet_dialog(BinaryAlphabetDialog)
-        )
-
-    def open_cipher_dialog(self):
-        dlg = CipherAlphaDialog(parent=self)
-        if dlg.exec():
-            self._save_alphabet(
-                dlg.result_data(),
-                dlg.result_filename(),
-                folder="ciphers",
-                fullpath=dlg.result_fullpath(),
+        for action, cls in (
+            (self.makeBrailleAction, BrailleAlphabetDialog),
+            (self.makeMorseAction, MorseAlphabetDialog),
+            (self.makeNumSysAction, NumeralAlphabetDialog),
+            (self.makeCiphersAction, CipherAlphaDialog),
+            (self.makeBinaryAction, BinaryAlphabetDialog),
+        ):
+            action.triggered.connect(
+                partial(self.open_alphabet_dialog, cls)
             )
-        
-    def open_alphabet_dialog(self, dialog_cls) -> None:
-        """Открывает диалог создания алфавита и сохраняет результат в JSON."""
+
+    def open_alphabet_dialog(self, dialog_cls: type) -> None:
+        """Открыть диалог создания алфавита и сохранить результат в JSON."""
         dlg = dialog_cls(self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
@@ -360,8 +305,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         if not data or not fname:
             return
 
-        # Если пользователь выбрал путь вручную — используем его,
-        # иначе — папку по умолчанию из класса (save_subdir).
+        # Ручной путь — используем его, иначе — save_subdir класса.
         full = dlg.result_fullpath()
         if full:
             target = Path(full)
@@ -379,12 +323,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         except OSError as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить файл:\n{e}")
             return
-        
-        # --- ОБНОВЛЕНИЕ alphabets.json ---
-        update_alphabets()
-        # --- ОБНОВЛЕНИЕ ВСЕХ КАРТОЧЕК ---
-        self._reload_all_alphabets()
 
+        update_alphabets()
+        self._reload_all_alphabets()
         self.statusbar.showMessage(f"Алфавит сохранён: {target}", 5000)
 
     def open_braille_input(self) -> None:
@@ -397,7 +338,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.braille_window.activateWindow()
 
     def _reload_all_alphabets(self) -> None:
-        """Перечитывает alphabets.json и обновляет все карточки действий."""
+        """Перечитать alphabets.json и обновить все карточки действий."""
         for w in self._cards():
             w.reload_alphabets()
 
@@ -405,27 +346,26 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         if SETTINGS.get("theme", DEFAULT_SETTINGS["theme"]) != "Системная":
             return
         apply_theme()
-        app = QApplication.instance()
-        p = get_palette()
-        app.setPalette(build_app_palette(p))
-        app.setStyleSheet(build_app_qss(p))
 
     # --------------------------------------------------------
     #   Генерация WAV
     # --------------------------------------------------------
 
     def _generate_morse_wav(self) -> None:
-        SAMPLE_RATE = int(SETTINGS.get("morse_sample_rate", 44100))
-        FREQ = float(SETTINGS.get("morse_freq", 800.0))
-        WPM = float(SETTINGS.get("morse_wpm", 25)) or 25.0
-        UNIT = 1.2 / WPM
+        sample_rate = int(SETTINGS.get("morse_sample_rate", 44100))
+        freq = float(SETTINGS.get("morse_freq", 800.0))
+        wpm = float(SETTINGS.get("morse_wpm", 25)) or 25.0
+        unit = 1.2 / wpm
 
         def tone(duration: float) -> list[float]:
-            n = int(SAMPLE_RATE * duration)
-            return [0.5 * math.sin(2 * math.pi * FREQ * i / SAMPLE_RATE) for i in range(n)]
+            n = int(sample_rate * duration)
+            return [
+                0.5 * math.sin(2 * math.pi * freq * i / sample_rate)
+                for i in range(n)
+            ]
 
         def silence(duration: float) -> list[float]:
-            return [0.0] * int(SAMPLE_RATE * duration)
+            return [0.0] * int(sample_rate * duration)
 
         samples: list[float] = []
         first_word = True
@@ -435,27 +375,30 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             if not word:
                 continue
             if not first_word:
-                samples += silence(UNIT * 7)
+                samples += silence(unit * 7)
             first_word = False
 
             for sym_idx, sym in enumerate(word.split()):
                 if sym_idx > 0:
-                    samples += silence(UNIT * 3)
+                    samples += silence(unit * 3)
                 for elem_idx, ch in enumerate(sym):
                     if elem_idx > 0:
-                        samples += silence(UNIT * 1)
+                        samples += silence(unit)
                     if ch == ".":
-                        samples += tone(UNIT)
+                        samples += tone(unit)
                     elif ch == "-":
-                        samples += tone(UNIT * 3)
+                        samples += tone(unit * 3)
 
         wav_path = data_path("temp_morse.wav")
         with wave.open(wav_path, "w") as w:
             w.setnchannels(1)
             w.setsampwidth(2)
-            w.setframerate(SAMPLE_RATE)
+            w.setframerate(sample_rate)
             frames = b"".join(
-                struct.pack("<h", int(max(-1.0, min(1.0, s)) * 32767)) for s in samples
+                struct.pack(
+                    "<h", int(max(-1.0, min(1.0, s)) * 32767)
+                )
+                for s in samples
             )
             w.writeframes(frames)
 
@@ -470,6 +413,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         self.player.reload_source()
         self.tBarWidget.show()
 
+    # --------------------------------------------------------
+    #   Путь к алфавиту и его имя
+    # --------------------------------------------------------
+
     def _alphabet_path_for(self, f: OperationForm, type_ind: int) -> str:
         match type_ind:
             case 0:
@@ -480,9 +427,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                 return alphabet_file("braille", f.alphabetCombo.currentData())
             case 4:
                 key = f.alphabetCombo.currentData()
-                if key.endswith(".json"):
-                    return alphabet_file("binary", key)
+                return alphabet_file("binary", key) if key.endswith(".json") else ""
+            case _:
                 return ""
+
     @staticmethod
     def _alphabet_display_name(alphabet_path: str) -> str:
         if not alphabet_path:
@@ -490,18 +438,20 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         try:
             with open(alphabet_path, encoding="utf-8") as fh:
                 meta = json.load(fh).get("meta") or {}
-            name = meta.get("name")
-            if name:
+            if name := meta.get("name"):
                 return str(name)
         except (OSError, ValueError):
             pass
         return Path(alphabet_path).name
 
+    # --------------------------------------------------------
+    #   Диалог неизвестных символов
+    # --------------------------------------------------------
+
     def _ask_unknown_policy(
-        self,
-        unknown: list[str],
-        alphabet_path: str,
+        self, unknown: list[str], alphabet_path: str
     ) -> UnknownPolicy | None:
+        """Спросить политику для неизвестных символов. None — отмена."""
         sample = "".join(unknown[:10])
         more = f" и ещё {len(unknown) - 10}" if len(unknown) > 10 else ""
         display = self._alphabet_display_name(alphabet_path)
@@ -513,10 +463,18 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             f"В тексте есть символы, отсутствующие в алфавите "
             f"«{display}»:\n{sample}{more}"
         )
-        btn_abort = box.addButton("До первой ошибки", QMessageBox.ButtonRole.AcceptRole)
-        btn_ignore = box.addButton("Игнорировать", QMessageBox.ButtonRole.ActionRole)
-        btn_replace = box.addButton("Заменить", QMessageBox.ButtonRole.ActionRole)
-        btn_cancel = box.addButton("Отмена", QMessageBox.ButtonRole.RejectRole)
+        btn_abort = box.addButton(
+            "До первой ошибки", QMessageBox.ButtonRole.AcceptRole
+        )
+        btn_ignore = box.addButton(
+            "Игнорировать", QMessageBox.ButtonRole.ActionRole
+        )
+        btn_replace = box.addButton(
+            "Заменить", QMessageBox.ButtonRole.ActionRole
+        )
+        btn_cancel = box.addButton(
+            "Отмена", QMessageBox.ButtonRole.RejectRole
+        )
         box.exec()
 
         clicked = box.clickedButton()
@@ -534,8 +492,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             )
             if not ok:
                 return None
-            # Пустая строка — осознанная замена на пустоту.
-            # Если пользователь хотел именно игнор — есть кнопка выше.
+            # Пустая строка — осознанная замена на пустоту;
+            # для игнора есть отдельная кнопка.
             return UnknownPolicy(mode=POLICY_REPLACE, replacement=text)
         # «До первой ошибки» — оставляем Warn
         return UnknownPolicy(mode=POLICY_WARN)
@@ -552,7 +510,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         alphabet_path: str,
         policy: UnknownPolicy,
     ) -> list[str]:
-        # Направление берём из карточки: codeRadio отмечен -> code(), иначе encode().
+        """Найти неизвестные символы до выполнения (best-effort)."""
         direction = "code" if f.codeRadio.isChecked() else "encode"
 
         try:
@@ -565,9 +523,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                         return []
                     cipher_cls = self.CIPHERS[idx]
                     if cipher_cls is Reverse:
-                        # алфавит не нужен, неизвестных символов нет
-                        return []
-                    params = dict(
+                        return []  # алфавит не нужен
+                    obj = cipher_cls(
                         alphabet=alphabet_path,
                         inp=text,
                         shift=f.operSpin.value(),
@@ -575,32 +532,31 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                         cols=f.operSpin.value(),
                         policy=policy,
                     )
-                    obj = cipher_cls(**params)
                 case 3:
                     obj = Braille(alphabet_path, text, policy=policy)
                 case 4:
                     key = f.alphabetCombo.currentData()
-                    enc = alphabet_file("binary", key) if key.endswith(".json") else key
+                    enc = (
+                        alphabet_file("binary", key)
+                        if key.endswith(".json")
+                        else key
+                    )
                     obj = Bytes(text, enc, policy=policy)
                     obj.set_direction(direction)
                     return obj._check_unknown_chars()
                 case _:
                     return []
 
-            # AlphabetAction понимает направление; прочие — нет.
             if isinstance(obj, AlphabetAction):
                 obj.set_direction(direction)
 
             return obj._check_unknown_chars()
         except UnknownSymbolPolicyError:
-            # Это и есть «неизвестный символ» — пробрасываем наверх,
-            # execute() покажет диалог через _handle_unknown_policy_error.
+            # Это и есть «неизвестный символ» — пусть обработает execute().
             raise
-        except ActionError as e:
-            # Конструктор упал по другой причине (неверный ключ, битый алфавит
-            # и т.п.) — не маскируем это под «неизвестные символы».
-            # Возвращаем пустой список: реальная ошибка всплывёт в _run_action,
-            # где будет показана корректным диалогом.
+        except ActionError:
+            # Иная ошибка конструктора (битый алфавит, неверный ключ)
+            # всплывёт в _run_action — не маскируем её под «неизвестный».
             return []
 
     def _resolve_policy(
@@ -611,6 +567,11 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         base_policy: UnknownPolicy,
         card_policy: UnknownPolicy | None,
     ) -> tuple[UnknownPolicy, UnknownPolicy | None, bool]:
+        """
+        Определить политику для карточки.
+
+        Возвращает (effective_policy, card_policy, cancelled).
+        """
         if card_policy is not None:
             return card_policy, card_policy, False
 
@@ -619,7 +580,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
         alphabet_path = self._alphabet_path_for(f, type_ind)
         try:
-            unknown = self._probe_unknown(type_ind, f, text, alphabet_path, base_policy)
+            unknown = self._probe_unknown(
+                type_ind, f, text, alphabet_path, base_policy
+            )
         except UnknownSymbolPolicyError as e:
             chosen = self._ask_unknown_policy([e.symbol], alphabet_path)
             if chosen is None:
@@ -648,8 +611,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         Возвращает (base_policy, card_policy, retry, cancelled).
         """
         if card_policy is not None:
-            # Пользователь уже выбрал политику для этой карточки —
-            # повторно не спрашиваем.
+            # Политика для карточки уже выбрана — второй раз не спрашиваем.
             self._show_action_error(exc)
             return base_policy, card_policy, False, True
 
@@ -663,10 +625,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         return chosen, chosen, True, False
 
     def _show_partial(self, partial: str, message: str) -> str:
-        """
-        Записать в outText частичный результат (если есть) + сообщение.
-        Возвращает текст, который попал в outText.
-        """
+        """Записать в outText partial + сообщение; вернуть итоговый текст."""
         text = f"{partial}\n[{message}]" if partial else message
         self.outText.setPlainText(text)
         return text
@@ -682,10 +641,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
     }
 
     def _show_action_error(self, exc: ActionError) -> None:
-        """
-        Единая точка показа ActionError:
-        сначала partial_out в outText, потом диалог.
-        """
+        """Единая точка показа ActionError: partial_out + диалог."""
         title, message, icon = exc.dialog_spec()
         partial = getattr(exc, "partial_out", "")
         self._show_partial(partial, message)
@@ -696,6 +652,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         box.setText(message)
         box.exec()
 
+    # --------------------------------------------------------
+    #   Выполнение одного действия
+    # --------------------------------------------------------
+
     def _run_action(
         self,
         type_ind: int,
@@ -703,10 +663,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         text: str,
         effective_policy: UnknownPolicy,
     ) -> str:
-        """
-        Выполняет одно действие над текстом. Может бросить исключения —
-        их обрабатывает вызывающий код.
-        """
+        """Выполнить одно действие над текстом (исключения — наружу)."""
         code_radio = f.codeRadio.isChecked()
 
         match type_ind:
@@ -726,13 +683,14 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                 return morse.encode()
 
             case 1:  # Системы счисления
-                conv = NumberSystem(
-                    alphabet_file("number_systems", f.alphabetCombo.currentData()),
+                return NumberSystem(
+                    alphabet_file(
+                        "number_systems", f.alphabetCombo.currentData()
+                    ),
                     f.inpSpin.value(),
                     f.operSpin.value(),
                     text,
-                )
-                return conv.oper()
+                ).oper()
 
             case 2:  # Шифры
                 idx = f.operCombo.currentIndex()
@@ -741,22 +699,18 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                 cipher_cls = self.CIPHERS[idx]
 
                 if cipher_cls is Reverse:
-                    # Алфавит не требуется
-                    cipher = Reverse(
+                    cipher = Reverse(inp=text, policy=effective_policy)
+                else:
+                    cipher = cipher_cls(
+                        alphabet=alphabet_file(
+                            "ciphers", f.alphabetCombo.currentData()
+                        ),
                         inp=text,
+                        shift=f.operSpin.value(),
+                        key=f.keyEdit.text(),
+                        cols=f.operSpin.value(),
                         policy=effective_policy,
                     )
-                else:
-                    params = {
-                        "alphabet": alphabet_file("ciphers", f.alphabetCombo.currentData()),
-                        "inp": text,
-                        "shift": f.operSpin.value(),
-                        "key": f.keyEdit.text(),
-                        "cols": f.operSpin.value(),
-                        "policy": effective_policy,
-                    }
-                    cipher = cipher_cls(**params)
-
                 return cipher.code() if code_radio else cipher.encode()
 
             case 3:  # Брайль
@@ -767,11 +721,17 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                 )
                 return braille.code() if code_radio else braille.encode()
 
-            case 4:
+            case 4:  # Бинарный код
                 key = f.alphabetCombo.currentData()
-                enc = alphabet_file("binary", key) if key.endswith(".json") else key
+                enc = (
+                    alphabet_file("binary", key)
+                    if key.endswith(".json")
+                    else key
+                )
                 binary = Bytes(text, enc, policy=effective_policy)
                 return binary.code() if code_radio else binary.encode()
+
+        raise ActionError(f"Неизвестный тип операции: {type_ind}")
 
     # --------------------------------------------------------
     #   Выполнение цепочки
@@ -804,7 +764,9 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                     return
 
                 try:
-                    text = self._run_action(type_ind, f, text, effective_policy)
+                    text = self._run_action(
+                        type_ind, f, text, effective_policy
+                    )
                     if type_ind == 0:
                         has_morse = True
                 except UnknownSymbolPolicyError as e:

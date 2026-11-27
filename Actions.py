@@ -14,50 +14,52 @@ from Settings import UnknownPolicy
 # ============================================================
 
 class Action:
-    """Загрузка/валидация алфавита, self.inp, self.out."""
+    """Базовый класс: загрузка алфавита, хранение входа и выхода."""
 
     REQUIRED_KEYS: tuple[str, ...] = ("meta", "letters")
 
     def __init__(self, alphabet: str, inp: str, enc: str = "utf-8") -> None:
-        self.alphabet_path = alphabet
+        self.alphabet_path: str = alphabet
         with open(alphabet, encoding=enc) as fh:
-            self.alphabet = json.load(fh)
+            self.alphabet: dict = json.load(fh)
         self._validate_alphabet()
-        self.inp = inp
+        self.inp: str = inp
         self.out: list[str] = []
 
     def _validate_alphabet(self) -> None:
+        """Проверить наличие обязательных ключей в алфавите."""
         missing = [k for k in self.REQUIRED_KEYS if not self.alphabet.get(k)]
         if missing:
             raise exs.InvalidAlphabetError(self.alphabet_path, missing)
 
     def _reset_output(self) -> None:
+        """Очистить накопленный вывод."""
         self.out = []
 
     def _finish(self, text: str) -> str:
-        """Сохранить результат и вернуть его же (удобно для return)."""
+        """Сохранить результат в self.out и вернуть его же."""
         self.out = [text]
         return text
 
 
 # ============================================================
-#   AlphabetAction — общий слой
+#   AlphabetAction — общий слой над "letters"
 # ============================================================
 
 class AlphabetAction(Action):
     """
-    Общий предок операций над "letters".
+    Промежуточный класс для операций, работающих с полем "letters".
 
-    Даёт наследникам:
-        - _char_to_idx / _idx_to_char;
-        - _find_index (точный и регистронезависимый поиск);
-        - _restore_case;
+    Предоставляет наследникам:
+        - отображения «символ <-> индекс» (_char_to_idx / _idx_to_char);
+        - поиск символа с учётом/без учёта регистра (_find_index);
+        - восстановление регистра (_restore_case);
         - политику обработки неизвестных символов;
-        - проверку входных символов с учётом направления (code/encode).
+        - проверку входа с учётом направления (_check_unknown_chars).
     """
 
     _policy: UnknownPolicy
-    _direction: str = "code"  # "code" | "encode"; наследники могут уточнять
+    _direction: str = "code"  # "code" — прямое преобразование, "encode" — обратное
 
     def __init__(
         self,
@@ -70,22 +72,24 @@ class AlphabetAction(Action):
         self._policy = policy if policy is not None else UnknownPolicy.current()
         self._build_char_maps()
 
-    # ---------- карта символов ----------
+    # ---------- построение карт символов ----------
 
     def _build_char_maps(self) -> None:
-        """Построить карты «символ <-> индекс» из self.alphabet['letters'].
+        """
+        Построить _char_to_idx и _idx_to_char из self.alphabet["letters"].
 
-        Поддерживает три формата letters:
-          - {"A": "...", "B": "..."}       — символ -> значение (dict)
-          - ["A", "B", "C"]               — просто список символов
-          - "ABC"                         — строка (как в шифрах)
+        Поддерживаются три формата:
+            - dict  {"A": "...", "B": "..."} — символ -> значение;
+            - list  ["A", "B", "C"];
+            - str   "ABC".
+        При дубликатах побеждает первое вхождение.
         """
         letters = self.alphabet["letters"]
         self._idx_to_char: list[str] = []
         self._char_to_idx: dict[str, int] = {}
 
         if isinstance(letters, dict):
-            items = list(letters.keys())
+            items: list[str] = list(letters.keys())
         elif isinstance(letters, (list, str)):
             items = list(letters)
         else:
@@ -94,9 +98,8 @@ class AlphabetAction(Action):
             )
 
         for idx, ch in enumerate(items):
-            if not isinstance(ch, str) or len(ch) == 0:
+            if not isinstance(ch, str) or not ch:
                 continue
-            # первый символ побеждает при дубликатах
             if ch in self._char_to_idx:
                 continue
             self._char_to_idx[ch] = idx
@@ -105,20 +108,23 @@ class AlphabetAction(Action):
     # ---------- направление ----------
 
     def set_direction(self, direction: str) -> None:
-        """Задать направление проверки входных символов: 'code' | 'encode'."""
+        """Задать направление проверки входа: 'code' или 'encode'."""
         if direction not in ("code", "encode"):
             raise ValueError(f"direction must be 'code' or 'encode', got {direction!r}")
         self._direction = direction
 
-    # ---------- неизвестные ----------
+    # ---------- неизвестные символы ----------
 
     def _known(self, ch: str) -> bool:
+        """Есть ли символ в алфавите."""
         return self._find_index(ch) is not None
 
     def _resolve_unknown(self, ch: str, partial_out: str = "") -> str | None:
+        """Применить политику к неизвестному символу (None — пропустить)."""
         return self._policy.resolve(ch, self.alphabet_path, partial_out)
 
     def _emit_unknown(self, target: list[str], ch: str) -> None:
+        """Разрешить неизвестный символ и, если есть замена, добавить в target."""
         repl = self._resolve_unknown(ch, partial_out="".join(target))
         if repl is not None:
             target.append(repl)
@@ -130,22 +136,19 @@ class AlphabetAction(Action):
         Уникальные символы входа, которые не будут обработаны
         в текущем направлении.
 
-        Для 'code'  — символы, отсутствующие в _char_to_idx (кодируемый текст).
-        Для 'encode' — символы/коды, не разбираемые декодером.
-        Базовая реализация корректна только для 'code';
-        направления с декодером переопределяют _check_undecodable().
+        Для 'code' — проверяется, что символ есть в _char_to_idx.
+        Для 'encode' — делегируется в _check_undecodable().
         """
         if self._direction == "encode":
             return self._check_undecodable()
         return self._check_unknown_chars_code()
 
     def _check_unknown_chars_code(self) -> list[str]:
+        """Уникальные непробельные символы, отсутствующие в алфавите."""
         unknown: list[str] = []
         seen: set[str] = set()
         for ch in self.inp:
-            if ch.isspace():
-                continue
-            if ch in seen:
+            if ch.isspace() or ch in seen:
                 continue
             seen.add(ch)
             if self._find_index(ch) is None:
@@ -153,13 +156,11 @@ class AlphabetAction(Action):
         return unknown
 
     def _check_undecodable(self) -> list[str]:
-        """
-        Для наследников без собственного декодера encode() совпадает
-        с code(), поэтому проверка та же.
-        """
+        """Для наследников без своего декодера совпадает с проверкой 'code'."""
         return self._check_unknown_chars_code()
 
     def _lookup_key(self, chunk: str) -> str | None:
+        """Найти ключ в letters (точный, затем при необходимости — без регистра)."""
         letters = self.alphabet["letters"]
         if chunk in letters:
             return chunk
@@ -172,7 +173,7 @@ class AlphabetAction(Action):
         return None
 
     def _find_index(self, ch: str) -> int | None:
-        """Точный поиск, затем (если не регистрозависимо) регистронезависимый."""
+        """Точный поиск индекса; при необходимости — регистронезависимый."""
         idx = self._char_to_idx.get(ch)
         if idx is not None:
             return idx
@@ -185,7 +186,7 @@ class AlphabetAction(Action):
         return None
 
     def _restore_case(self, source: str, target: str) -> str:
-        """Перенести регистр source на target (для одного символа)."""
+        """Перенести регистр source на target (для одиночного символа)."""
         if not source or not target:
             return target
         if source.isupper():
@@ -195,15 +196,14 @@ class AlphabetAction(Action):
         return target
 
     def _require_str_letters(self) -> list[str]:
-        """Проверить, что letters — плоский набор одиночных символов.
-
-        Возвращает список символов. Нужен шифрам (Caesar, Vigenere,
-        Atbash, A1Z26, Playfair), где letters обязан быть простым
-        алфавитом, а не картой «символ -> код».
+        """
+        Проверить, что letters — плоский набор одиночных символов.
+        Возвращает список символов; нужен шифрам (Caesar, Vigenere,
+        Atbash, A1Z26, Playfair), где letters обязан быть простым алфавитом.
         """
         letters = self.alphabet["letters"]
         if isinstance(letters, dict):
-            items = list(letters.keys())
+            items: list[str] = list(letters.keys())
         elif isinstance(letters, (list, str)):
             items = list(letters)
         else:
@@ -222,11 +222,11 @@ class AlphabetAction(Action):
 
 
 # ============================================================
-#   _OperIsCode — удобная примесь: oper() == code()
+#   _OperIsCode — если у наследника нет своего oper(), он равен code()
 # ============================================================
 
 class _OperIsCode(AlphabetAction):
-    """Если у наследника нет своего oper(), он равен code()."""
+    """Примесь: oper() по умолчанию вызывает code()."""
 
     def _oper(self) -> str:
         return self.code()
@@ -254,21 +254,21 @@ class Morse(_OperIsCode):
             raise exs.MissingSpacerError(self.alphabet_path)
 
         letters = self.alphabet["letters"]
-        self._has_space_symbol = " " in letters
+        self._has_space_symbol: bool = " " in letters
 
-        # карта «код -> символ»; при дубликатах побеждает первый встреченный
+        # обратная карта «код -> символ»; при дубликатах побеждает первый
         self._code_to_char: dict[str, str] = {}
         for ch, code in letters.items():
             self._code_to_char.setdefault(code, ch)
 
-        self._max_code_len = max((len(c) for c in self._code_to_char), default=1)
-        self._max_char_len = max((len(c) for c in letters), default=1)
+        self._max_code_len: int = max((len(c) for c in self._code_to_char), default=1)
+        self._max_char_len: int = max((len(c) for c in letters), default=1)
 
     # ---------- кодирование ----------
 
     def code(self) -> str:
         self._reset_output()
-        spacer = self.alphabet["meta"]["spacer"]
+        spacer: str = self.alphabet["meta"]["spacer"]
         letters = self.alphabet["letters"]
         s, n = self.inp, len(self.inp)
         i = 0
@@ -305,13 +305,10 @@ class Morse(_OperIsCode):
     # ---------- декодирование ----------
 
     def _check_undecodable(self) -> list[str]:
-        """
-        Проверка входа для encode(): символа нет ни в одном коде,
-        ни среди пробелов/разделителей.
-        """
+        """Уникальные символы входа, не являющиеся ни кодом, ни разделителем."""
         if not self.inp.strip():
             return []
-        spacer = self.alphabet["meta"]["spacer"]
+        spacer: str = self.alphabet["meta"]["spacer"]
         unknown: list[str] = []
         seen: set[str] = set()
 
@@ -329,7 +326,7 @@ class Morse(_OperIsCode):
         if not self.inp.strip():
             return ""
 
-        spacer = self.alphabet["meta"]["spacer"]
+        spacer: str = self.alphabet["meta"]["spacer"]
         parts: list[str] = []
         segments = self.inp.split(" ")
 
@@ -378,17 +375,18 @@ class NumberSystem(_OperIsCode):
     ) -> None:
         super().__init__(alphabet, inp, enc, policy=policy)
 
-        self.inpSys, self.outSys = int(inpSys), int(outSys)
+        self.inpSys: int = int(inpSys)
+        self.outSys: int = int(outSys)
         if self.inpSys < 2 or self.outSys < 2:
             raise exs.ActionError(
                 f"Основание системы счисления должно быть >= 2 "
                 f"(получено {self.inpSys} -> {self.outSys})"
             )
 
-        self.max_frac_digits = 20
-        self._inp_upper = inp.upper()
+        self.max_frac_digits: int = 20
+        self._inp_upper: str = inp.upper()
 
-        # карта символ -> вес и обратная
+        # карта «символ -> вес» и обратная
         self._digit_value: dict[str, int] = {
             sym.upper(): int(val) for sym, val in self.alphabet["letters"].items()
         }
@@ -396,15 +394,15 @@ class NumberSystem(_OperIsCode):
         for sym, val in self._digit_value.items():
             self._value_digit.setdefault(val, sym)
 
-        # допустимые цифры входной системы (строго < inpSys)
-        self._allowed = {
+        # допустимые цифры входной системы (вес строго < inpSys)
+        self._allowed: set[str] = {
             sym for sym, val in self._digit_value.items() if 0 <= val < self.inpSys
         }
 
     # ---------- токенизация ----------
 
     def _tokenize(self) -> list[tuple[str, bool]]:
-        """Разбить вход на (фрагмент, is_number)."""
+        """Разбить вход на пары (фрагмент, is_number)."""
         tokens: list[tuple[str, bool]] = []
         buf: list[str] = []
         is_num: bool | None = None
@@ -462,6 +460,7 @@ class NumberSystem(_OperIsCode):
     # ---------- разбор / вывод ----------
 
     def _parse_number(self, token: str) -> Fraction:
+        """Разобрать числовой токен в Fraction с учётом inpSys."""
         sign = -1 if token.startswith("-") else 1
         s = token.lstrip("-")
         int_part, _, frac_part = s.partition(".")
@@ -488,6 +487,7 @@ class NumberSystem(_OperIsCode):
         return sign * (int_val + frac_val)
 
     def _format_number(self, value: Fraction) -> str:
+        """Отформатировать Fraction в строку с учётом outSys."""
         sign = ""
         if value < 0:
             sign, value = "-", -value
@@ -529,6 +529,7 @@ class NumberSystem(_OperIsCode):
     # ---------- публичные ----------
 
     def convert(self, n: Fraction) -> str:
+        """Преобразовать число в строку в outSys."""
         return self._format_number(n)
 
     def _oper(self) -> str:
@@ -566,9 +567,9 @@ class Braille(_OperIsCode):
         super().__init__(alphabet, inp, enc, policy=policy)
 
         prefixes = self.alphabet.get("prefixes") or {}
-        self._num_prefix = self._prefix_char(prefixes, "num_prefix")
-        self._cap_prefix = self._prefix_char(prefixes, "capital_prefix")
-        self._cap_word_prefix = self._prefix_char(prefixes, "capital_word_prefix")
+        self._num_prefix: str | None = self._prefix_char(prefixes, "num_prefix")
+        self._cap_prefix: str | None = self._prefix_char(prefixes, "capital_prefix")
+        self._cap_word_prefix: str | None = self._prefix_char(prefixes, "capital_word_prefix")
 
         self._letter_to_code: dict[str, str] = {}
         self._digit_to_code: dict[str, str] = {}
@@ -582,7 +583,7 @@ class Braille(_OperIsCode):
         self._load_section("punctuation", self._other_to_code, self._code_to_other)
         self._load_section("math", self._other_to_code, self._code_to_other)
 
-        # общая карта для «жадного» кодирования
+        # общая карта «символ -> код» для жадного кодирования
         self._char_to_code: dict[str, str] = {}
         for mapping in (
             self._letter_to_code,
@@ -592,11 +593,8 @@ class Braille(_OperIsCode):
             for sym, code in mapping.items():
                 self._char_to_code.setdefault(sym, code)
 
-        self._word_sep = self._BRAILLE_BLANK
-        self._max_code_len = max(
-            (len(c) for c in self._char_to_code),
-            default=1,
-        )
+        self._word_sep: str = self._BRAILLE_BLANK
+        self._max_code_len: int = max(len(c) for c in self._char_to_code)
         if self._word_sep:
             self._max_code_len = max(self._max_code_len, len(self._word_sep))
 
@@ -615,12 +613,11 @@ class Braille(_OperIsCode):
             reverse=True,
         )
 
-
     def _check_undecodable(self) -> list[str]:
         """
-        Проверка входа для encode(): каждый непробельный фрагмент должен
-        быть либо префиксом, либо известным кодом.
-        Повторяет разбор encode(), но не строит выход.
+        Проверка входа для encode(): каждый непробельный фрагмент
+        должен быть либо префиксом, либо известным кодом.
+        Логика повторяет encode(), но не строит выход.
         """
         s, n = self.inp, len(self.inp)
         i = 0
@@ -658,6 +655,7 @@ class Braille(_OperIsCode):
         to_code: dict[str, str],
         from_code: dict[str, str],
     ) -> None:
+        """Загрузить секцию алфавита в прямую и обратную карты."""
         for sym, info in (self.alphabet.get(name) or {}).items():
             code = self._code_of(info)
             if code:
@@ -666,10 +664,12 @@ class Braille(_OperIsCode):
 
     @staticmethod
     def _code_of(info: object) -> str | None:
+        """Извлечь код из значения секции (dict с 'char' или сам str)."""
         return info.get("char") if isinstance(info, dict) else info  # type: ignore[return-value]
 
     @staticmethod
     def _prefix_char(prefixes: dict, key: str) -> str | None:
+        """Извлечь символ префикса из prefixes[key]."""
         info = prefixes.get(key)
         if not info:
             return None
@@ -725,6 +725,7 @@ class Braille(_OperIsCode):
         return "".join(self.out)
 
     def _emit_word(self, word: str) -> None:
+        """Закодировать слово с учётом регистра (cap_word / cap)."""
         if len(word) >= 2 and all(c.isupper() for c in word) and self._cap_word_prefix:
             self.out.append(self._cap_word_prefix)
             for c in word:
@@ -786,7 +787,7 @@ class Braille(_OperIsCode):
 
             out_sym = self._decode_code(code, num_mode)
             if out_sym is None:
-                # цифровой режим не сработал — выходим из него и пробуем ещё раз
+                # цифровой режим не сработал — выходим из него и пробуем снова
                 num_mode = False
                 out_sym = self._decode_code(code, False)
 
@@ -803,7 +804,7 @@ class Braille(_OperIsCode):
         return self._finish("".join(result))
 
     def _match_code(self, s: str, i: int) -> tuple[str | None, int]:
-        """Найти самый длинный код в s[i:]."""
+        """Найти самый длинный код в s[i:] (возвращает код и его длину)."""
         for ln in range(min(self._max_code_len, len(s) - i), 0, -1):
             cand = s[i : i + ln]
             if (
@@ -832,8 +833,12 @@ class Braille(_OperIsCode):
 # ============================================================
 
 class Bytes(AlphabetAction):
-    """Текст <-> битовая строка. Стандартные кодировки и кастомные
-    алфавиты из alphabets/binary (символ <-> фиксированное число байт)."""
+    """
+    Текст <-> битовая строка.
+
+    Поддерживает стандартные кодировки и кастомные алфавиты из
+    alphabets/binary (символ <-> фиксированное число байт).
+    """
 
     BYTE_SEP: str = " "
 
@@ -843,13 +848,13 @@ class Bytes(AlphabetAction):
         enc: str = "utf-8",
         policy: UnknownPolicy | None = None,
     ) -> None:
-        self.inp = inp
-        self.enc = enc
+        self.inp: str = inp
+        self.enc: str = enc
         self.out: list[str] = []
         self.alphabet_path: str | None = None
         self.alphabet: dict | None = None
 
-        self._custom = False
+        self._custom: bool = False
         self._char_to_code: dict[str, str] = {}
         self._code_to_char: dict[str, str] = {}
         self._bytes_per_char: int = 0
@@ -868,6 +873,7 @@ class Bytes(AlphabetAction):
     # ---------- загрузка ----------
 
     def _load_custom_alphabet(self, path: str) -> None:
+        """Загрузить кастомный алфавит «символ -> битовая строка»."""
         try:
             with open(path, encoding="utf-8") as fh:
                 data = json.load(fh)
@@ -887,8 +893,10 @@ class Bytes(AlphabetAction):
         self.alphabet = data
 
         for ch, code in letters.items():
-            if not isinstance(code, str) or len(code) != n_bytes * 8 or any(
-                c not in "01" for c in code
+            if (
+                not isinstance(code, str)
+                or len(code) != n_bytes * 8
+                or any(c not in "01" for c in code)
             ):
                 raise exs.ActionError(
                     f"Код для {ch!r} должен быть строкой из {n_bytes * 8} бит (0/1)"
@@ -901,6 +909,7 @@ class Bytes(AlphabetAction):
     # ---------- проверка неизвестных (code) ----------
 
     def _casefold_match(self, ch: str) -> str | None:
+        """Найти символ в _char_to_code без учёта регистра (если разрешено)."""
         if getattr(self._policy, "case_sensitive", True):
             return None
         folded = ch.casefold()
@@ -910,6 +919,7 @@ class Bytes(AlphabetAction):
         return None
 
     def _check_unknown_chars_code(self) -> list[str]:
+        """Уникальные символы, которые нельзя закодировать в текущем режиме."""
         unknown: list[str] = []
         seen: set[str] = set()
         for ch in self.inp:
@@ -929,6 +939,7 @@ class Bytes(AlphabetAction):
     # ---------- проверка неизвестных (encode) ----------
 
     def _check_undecodable(self) -> list[str]:
+        """Уникальные битовые чанки, которые не удаётся декодировать."""
         bits = "".join(c for c in self.inp if c in "01")
         unknown: list[str] = []
         seen: set[str] = set()
@@ -962,6 +973,7 @@ class Bytes(AlphabetAction):
     # ---------- code (текст -> биты) ----------
 
     def _code_custom(self) -> str:
+        """Кодирование через кастомный алфавит; вывод — байты через пробел."""
         self._reset_output()
         out_chunks: list[str] = []
         for ch in self.inp:
@@ -977,18 +989,17 @@ class Bytes(AlphabetAction):
                 if repl is not None:
                     out_chunks.append(repl)
                 continue
-            
-            # --- ИЗМЕНЕНИЕ: разбиваем код на байты ---
-            # code — строка длиной N*8, разбиваем её на 8-битные куски
-            bytes_split = [code[i:i+8] for i in range(0, len(code), 8)]
-            out_chunks.extend(bytes_split) 
-            
+
+            # code — строка длиной N*8, разбиваем на 8-битные куски
+            bytes_split = [code[i:i + 8] for i in range(0, len(code), 8)]
+            out_chunks.extend(bytes_split)
+
         return self._finish(self.BYTE_SEP.join(out_chunks))
 
     def code(self) -> str:
         if self._custom:
             return self._code_custom()
-        # Стандартная кодировка: WARN не поддерживаем — кидаем ActionError
+        # Стандартная кодировка: ошибки кодирования -> ActionError
         self._reset_output()
         try:
             data = self.inp.encode(self.enc)
@@ -1001,6 +1012,7 @@ class Bytes(AlphabetAction):
     # ---------- encode (биты -> текст) ----------
 
     def _encode_custom(self) -> str:
+        """Декодирование через кастомный алфавит."""
         self._reset_output()
         bits = "".join(c for c in self.inp if c in "01")
         if not bits:
@@ -1068,9 +1080,10 @@ class Caesar(_OperIsCode):
         if len(self._idx_to_char) < 2:
             raise exs.ActionError("Алфавит для шифра Цезаря слишком короткий")
 
-        self.shift = self._read_shift(shift)
+        self.shift: int = self._read_shift(shift)
 
     def _read_shift(self, shift: int | None) -> int:
+        """Взять сдвиг из аргумента или из meta.shift (по умолчанию 3)."""
         if shift is not None:
             return int(shift)
         meta = self.alphabet.get("meta") or {}
@@ -1082,6 +1095,7 @@ class Caesar(_OperIsCode):
             )
 
     def _convert(self, delta: int) -> str:
+        """Сдвинуть каждый известный символ на delta позиций."""
         self._reset_output()
         result: list[str] = []
         n = len(self._idx_to_char)
@@ -1130,11 +1144,12 @@ class A1Z26(_OperIsCode):
         self._num_to_char: dict[int, str] = {i + 1: ch for i, ch in enumerate(letters)}
 
         meta = self.alphabet.get("meta") or {}
-        self.sep = sep or str(meta.get("sep", "-"))
+        self.sep: str = sep or str(meta.get("sep", "-"))
 
     # ---------- вспомогательное ----------
 
     def _lookup(self, ch: str) -> int | None:
+        """Номер символа в алфавите (с учётом политики по регистру)."""
         if ch in self._char_to_num:
             return self._char_to_num[ch]
         if getattr(self._policy, "case_sensitive", True):
@@ -1251,7 +1266,7 @@ class Vigenere(_OperIsCode):
         if not key:
             raise exs.ActionError("Ключ шифра Виженёра не может быть пустым")
 
-        self.key = key
+        self.key: str = key
         self._key_indices: list[int] = []
         for pos, ch in enumerate(key):
             idx = self._find_index(ch)
@@ -1265,6 +1280,7 @@ class Vigenere(_OperIsCode):
             self._key_indices.append(idx)
 
     def _convert(self, sign: int) -> str:
+        """Сдвиг по ключу; знак +1 — кодирование, -1 — декодирование."""
         self._reset_output()
         result: list[str] = []
         n = len(self._idx_to_char)
@@ -1318,6 +1334,7 @@ class Atbash(_OperIsCode):
             )
 
     def _convert(self) -> str:
+        """Заменить символ на симметричный относительно середины алфавита."""
         self._reset_output()
         result: list[str] = []
         n = len(self._idx_to_char)
@@ -1362,7 +1379,8 @@ class Playfair(_OperIsCode):
 
         # размер таблицы
         try:
-            self.rows, self.cols = int(meta["rows"]), int(meta["cols"])
+            self.rows: int = int(meta["rows"])
+            self.cols: int = int(meta["cols"])
         except (KeyError, TypeError, ValueError):
             raise exs.InvalidAlphabetError(
                 self.alphabet_path,
@@ -1373,13 +1391,13 @@ class Playfair(_OperIsCode):
                 f"Некорректные размеры таблицы: {self.rows}x{self.cols}"
             )
 
-        self._filler = self._read_filler(meta)
-        self._aliases = self._read_aliases(meta)
+        self._filler: str = self._read_filler(meta)
+        self._aliases: dict[str, str] = self._read_aliases(meta)
 
         # Playfair работает в верхнем регистре
         letters = self.alphabet["letters"]
-        self._char_to_idx = {ch.upper(): i for i, ch in enumerate(letters)}
-        self._idx_to_char = [ch.upper() for ch in letters]
+        self._char_to_idx: dict[str, int] = {ch.upper(): i for i, ch in enumerate(letters)}
+        self._idx_to_char: list[str] = [ch.upper() for ch in letters]
 
         n_cells = sum(1 for ch in self._idx_to_char if ch not in self._aliases)
         if self.rows * self.cols != n_cells:
@@ -1393,9 +1411,9 @@ class Playfair(_OperIsCode):
         if not key:
             raise exs.ActionError("Ключ шифра Плейфера не может быть пустым")
 
-        self.key = key
+        self.key: str = key
         self._build_table(key)
-        self._norm = self._normalize(self.inp)
+        self._norm: str = self._normalize(self.inp)
 
     # ---------- мета ----------
 
@@ -1403,8 +1421,7 @@ class Playfair(_OperIsCode):
         """
         Символы, которые Playfair не сможет обработать.
 
-        Отличие от базовой проверки: символ, являющийся алиасом
-        (например, 'J' -> 'I' или 'ё' -> 'е'), считается известным —
+        Символ-алиас (например, 'J' -> 'I') считается известным:
         _normalize всё равно заменит его до шифрования.
         """
         known = set(self._char_to_idx) | set(self._aliases)
@@ -1420,6 +1437,7 @@ class Playfair(_OperIsCode):
         return unknown
 
     def _read_filler(self, meta: dict) -> str:
+        """Прочитать и провалидировать meta.filler (один символ из алфавита)."""
         filler = meta.get("filler", "X")
         if not isinstance(filler, str) or len(filler) != 1:
             raise exs.ActionError(
@@ -1432,7 +1450,7 @@ class Playfair(_OperIsCode):
         return filler.upper()
 
     def _read_aliases(self, meta: dict) -> dict[str, str]:
-        """Прочитать и провалидировать meta.aliases; защита от цепочек и циклов."""
+        """Прочитать meta.aliases; защита от цепочек и циклов."""
         aliases = meta.get("aliases") or {}
         if not isinstance(aliases, dict):
             raise exs.InvalidAlphabetError(
@@ -1481,6 +1499,7 @@ class Playfair(_OperIsCode):
     # ---------- таблица ----------
 
     def _build_table(self, key: str) -> None:
+        """Построить таблицу rows x cols из ключа и остатка алфавита."""
         seen: set[str] = set()
         ordered: list[str] = []
 
@@ -1572,6 +1591,7 @@ class Playfair(_OperIsCode):
         return bigrams
 
     def _transform_bigram(self, a: str, b: str, sign: int) -> tuple[str, str]:
+        """Преобразовать биграмму по правилам Плейфера (sign задаёт направление)."""
         ra, ca = self._pos[a]
         rb, cb = self._pos[b]
         if ra == rb:
@@ -1589,6 +1609,7 @@ class Playfair(_OperIsCode):
     # ---------- публичные ----------
 
     def _run(self, sign: int) -> str:
+        """Прогнать все биграммы через таблицу с заданным знаком."""
         self._reset_output()
         result: list[str] = []
         for a, b in self._split_bigrams(self._norm):
@@ -1623,8 +1644,8 @@ class Reverse(_OperIsCode):
         policy: UnknownPolicy | None = None,
         **kwargs: object,
     ) -> None:
-        # Не вызываем super().__init__(): он грузит алфавит.
-        self.inp = inp
+        # Намеренно не вызываем super().__init__(): он грузит алфавит.
+        self.inp: str = inp
         self.out: list[str] = []
         self._policy = policy if policy is not None else UnknownPolicy.current()
         self._direction = "code"
@@ -1655,12 +1676,9 @@ class ColumnarTransposition(_OperIsCode):
     Алфавит задаёт набор допустимых символов; всё, чего в нём нет,
     обрабатывается политикой неизвестных символов (как в Caesar/Atbash).
 
-    Количество символов в строке таблицы (ширина) берётся из operSpin.
-    Хвост последней строки при кодировании дополняется пробелами,
-    при декодировании — обрезается по исходной длине.
-
-    Работает с произвольным алфавитом (в т.ч. многосимвольными ключами
-    letters, если они заданы списком/строкой).
+    Ширина таблицы берётся из operSpin. При кодировании хвост последней
+    строки дополняется пробелами, при декодировании — обрезается по
+    исходной длине.
     """
 
     def __init__(
@@ -1679,14 +1697,16 @@ class ColumnarTransposition(_OperIsCode):
             raise exs.ActionError(
                 f"Ширина таблицы должна быть >= 1 (получено {cols})"
             )
-        self.cols = int(cols)
+        self.cols: int = int(cols)
 
     # ---------- вспомогательное ----------
 
     def _known_char(self, ch: str) -> bool:
+        """Есть ли символ в алфавите."""
         return self._find_index(ch) is not None
 
     def _rows(self, length: int) -> int:
+        """Число строк, необходимое для length символов при данной ширине."""
         return (length + self.cols - 1) // self.cols
 
     # ---------- кодирование ----------
@@ -1714,7 +1734,7 @@ class ColumnarTransposition(_OperIsCode):
         total = rows * self.cols
         padded = chars + [" "] * (total - len(chars))
 
-        # 3) читаем по столбцам
+        # 3) читать по столбцам
         out: list[str] = []
         for c in range(self.cols):
             for r in range(rows):
@@ -1745,8 +1765,8 @@ class ColumnarTransposition(_OperIsCode):
         rows = self._rows(len(chars))
         total = rows * self.cols
         if len(chars) < total:
-            # добиваем тем же символом, что и при кодировании (пробел)
-            # — иначе восстановление невозможно
+            # добиваем тем же символом, что и при кодировании (пробелом),
+            # иначе восстановление невозможно
             chars = chars + [" "] * (total - len(chars))
 
         # 2) обратное чтение: столбцы -> строки

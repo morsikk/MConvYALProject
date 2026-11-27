@@ -2,17 +2,14 @@
 #   exceptions.py — кастомные исключения приложения
 # ============================================================
 
-
 class ActionError(Exception):
     """
-    Базовое исключение для всех ошибок модуля actions.
+    База для всех ошибок модуля actions.
 
-    Наследники несут дополнительный контекст (какой символ,
-    какая часть результата уже готова и т.п.), чтобы вызывающий
-    код мог показать пользователю осмысленное сообщение.
-
-    Презентационные атрибуты (title, icon) и метод dialog_spec()
-    позволяют UI показать ошибку единообразно, не разбирая типы.
+    Наследники несут контекст (символ, частичный результат и т.п.),
+    чтобы UI мог показать осмысленное сообщение. Презентационные
+    атрибуты (title, icon) + dialog_spec() позволяют показывать
+    ошибку единообразно, не разбирая типы.
     """
 
     title: str = "Ошибка"
@@ -20,7 +17,10 @@ class ActionError(Exception):
 
     def __init__(self, message: str) -> None:
         super().__init__(message)
-        self.message = message
+
+    @property
+    def message(self) -> str:
+        return str(self.args[0]) if self.args else ""
 
     def dialog_spec(self) -> tuple[str, str, str]:
         """(заголовок, текст, иконка) для показа пользователю."""
@@ -36,21 +36,21 @@ class UnknownSymbolError(ActionError):
     Символ отсутствует в выбранном алфавите.
 
     Атрибуты:
-        symbol:      символ (или фрагмент), который не удалось найти;
-        partial_out: уже закодированная часть результата
-                     (строка, готовая к показу пользователю);
-        message:     текстовое пояснение.
+        symbol:      символ (или фрагмент), который не найден;
+        alphabet_path: путь к JSON-алфавиту;
+        partial_out: уже закодированная часть результата.
     """
 
-    def __init__(self, symbol: str, alphabet_path: str, partial_out: str = ""):
-        self.symbol = symbol
-        self.alphabet_path = alphabet_path
-        self.partial_out = partial_out
-        self.message = (
+    def __init__(
+        self, symbol: str, alphabet_path: str, partial_out: str = ""
+    ) -> None:
+        super().__init__(
             f"Символ {symbol!r} отсутствует в алфавите «{alphabet_path}». "
             f"Политика: до первой ошибки."
         )
-        super().__init__(self.message)
+        self.symbol = symbol
+        self.alphabet_path = alphabet_path
+        self.partial_out = partial_out
 
 
 class InvalidAlphabetError(ActionError):
@@ -65,25 +65,23 @@ class InvalidAlphabetError(ActionError):
     title = "Ошибка алфавита"
 
     def __init__(self, path: str, missing: list[str]) -> None:
-        message = (
-            f"Некорректный алфавит '{path}': " f"отсутствуют или пусты поля {missing}"
+        super().__init__(
+            f"Некорректный алфавит '{path}': "
+            f"отсутствуют или пусты поля {missing}"
         )
-        super().__init__(message)
         self.path = path
         self.missing = missing
 
 
 class InvalidKeySymbolError(ActionError):
     """
-    В ключе шифра Виженёра встретился символ, которого нет
-    в алфавите.
+    В ключе шифра Виженёра встретился символ, которого нет в алфавите.
 
     Атрибуты:
-        symbol:       символ ключа, отсутствующий в алфавите;
-        position:     позиция этого символа в ключе (0-based);
-        key:          ключ целиком (для диагностики);
-        alphabet_path: путь к JSON-алфавиту;
-        message:      текстовое пояснение.
+        symbol:        символ ключа, отсутствующий в алфавите;
+        position:      позиция этого символа в ключе (0-based);
+        key:           ключ целиком (для диагностики);
+        alphabet_path: путь к JSON-алфавиту.
     """
 
     title = "Ошибка ключа"
@@ -117,8 +115,7 @@ class MissingSpacerError(ActionError):
     title = "Ошибка алфавита"
 
     def __init__(self, path: str) -> None:
-        message = f"В алфавите '{path}' не задан meta.spacer"
-        super().__init__(message)
+        super().__init__(f"В алфавите '{path}' не задан meta.spacer")
         self.path = path
 
 
@@ -127,18 +124,18 @@ class MissingSpaceSymbolError(ActionError):
     В алфавите нет символа пробела, хотя входной текст его содержит.
 
     Атрибуты:
-        symbol: сам пробельный символ (обычно ' ');
+        symbol:      сам пробельный символ (обычно ' ');
         partial_out: уже закодированная часть результата.
     """
 
     def __init__(self, symbol: str, partial_out: str) -> None:
-        message = (
+        super().__init__(
             f"Символ пробела '{symbol}' отсутствует в выбранном алфавите "
             f"(добавьте его в letters)"
         )
-        super().__init__(message)
         self.symbol = symbol
         self.partial_out = partial_out
+
 
 class UnknownSymbolPolicyError(ActionError):
     """
@@ -158,11 +155,10 @@ class UnknownSymbolPolicyError(ActionError):
         alphabet_path: str | None = None,
         partial_out: str = "",
     ) -> None:
-        self.symbol = symbol
-        self.alphabet_path = alphabet_path
-        self.partial_out = partial_out
-        self.message = (
+        super().__init__(
             f"Символ {symbol!r} отсутствует в алфавите "
             f"{alphabet_path or '<неизвестно>'}."
         )
-        super().__init__(self.message)
+        self.symbol = symbol
+        self.alphabet_path = alphabet_path
+        self.partial_out = partial_out
