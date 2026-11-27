@@ -8,42 +8,76 @@ from pathlib import Path
 from shutil import copy2
 
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QDialog, QFileDialog, QMessageBox,
-    QLabel, QInputDialog, QLineEdit,
+    QApplication,
+    QMainWindow,
+    QDialog,
+    QFileDialog,
+    QMessageBox,
+    QLabel,
+    QInputDialog,
+    QLineEdit,
 )
 
-from Paths import update_alphabets, alphabet_file, data_path
+from Paths import update_alphabets, alphabet_file, data_path, init_external_alphabets, resource_path
 
 from ConverterWidgets import (
-    Ui_MainWindow, ActionWidget, OperationForm, BrailleWindow,
-    SettingsDialog, ImportAlphabetDialog, CipherAlphaDialog,
-    NumeralAlphabetDialog, MorseAlphabetDialog, BinaryAlphabetDialog,
+    Ui_MainWindow,
+    ActionWidget,
+    OperationForm,
+    BrailleWindow,
+    SettingsDialog,
+    ImportAlphabetDialog,
+    CipherAlphaDialog,
+    NumeralAlphabetDialog,
+    MorseAlphabetDialog,
+    BinaryAlphabetDialog,
     BrailleAlphabetDialog,
-    get_palette, build_app_palette, build_app_qss, apply_theme,
-    DEFAULT_SETTINGS, SETTINGS,
+    get_palette,
+    build_app_palette,
+    build_app_qss,
+    apply_theme,
+    DEFAULT_SETTINGS,
+    SETTINGS,
 )
 from Actions import (
-    AlphabetAction, Morse, NumberSystem, Braille, Bytes,
-    Caesar, A1Z26, Vigenere, Atbash, Playfair, Reverse,
+    AlphabetAction,
+    Morse,
+    NumberSystem,
+    Braille,
+    Bytes,
+    Caesar,
+    A1Z26,
+    Vigenere,
+    Atbash,
+    Playfair,
+    Reverse,
     ColumnarTransposition,
 )
 from Exceptions import ActionError, UnknownSymbolPolicyError
 from Settings import (
-    UnknownPolicy, POLICY_IGNORE, POLICY_REPLACE, POLICY_WARN,
+    UnknownPolicy,
+    POLICY_IGNORE,
+    POLICY_REPLACE,
+    POLICY_WARN,
     load_settings,
 )
-
 
 # ============================================================
 #   MainWindow
 # ============================================================
+
 
 class MainWindow(QMainWindow, Ui_MainWindow):
     """Главное окно приложения."""
 
     # Классы шифров по индексу operCombo — чтобы не плодить match-case
     CIPHERS: tuple[type, ...] = (
-        Caesar, Vigenere, A1Z26, Atbash, Playfair, Reverse,
+        Caesar,
+        Vigenere,
+        A1Z26,
+        Atbash,
+        Playfair,
+        Reverse,
         ColumnarTransposition,
     )
 
@@ -124,9 +158,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                 result.append(w)
         return result
 
-    def _swap_cards(
-        self, cards: list[ActionWidget], i: int, j: int
-    ) -> None:
+    def _swap_cards(self, cards: list[ActionWidget], i: int, j: int) -> None:
         cards[i], cards[j] = cards[j], cards[i]
         for w in cards:
             self.actionsLayout.removeWidget(w)
@@ -190,7 +222,8 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         src = Path(data_path("temp_morse.wav"))
         if not src.exists():
             QMessageBox.warning(
-                self, "Сохранение звука",
+                self,
+                "Сохранение звука",
                 "Файл temp_morse.wav не найден. Откройте плеер морзе ещё раз.",
             )
             return
@@ -242,8 +275,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             reply = QMessageBox.question(
                 self,
                 "Файл уже существует",
-                f"Файл «{dst.name}» уже есть в папке «{subdir}».\n"
-                "Перезаписать?",
+                f"Файл «{dst.name}» уже есть в папке «{subdir}».\n" "Перезаписать?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
@@ -290,9 +322,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             (self.makeCiphersAction, CipherAlphaDialog),
             (self.makeBinaryAction, BinaryAlphabetDialog),
         ):
-            action.triggered.connect(
-                partial(self.open_alphabet_dialog, cls)
-            )
+            action.triggered.connect(partial(self.open_alphabet_dialog, cls))
 
     def open_alphabet_dialog(self, dialog_cls: type) -> None:
         """Открыть диалог создания алфавита и сохранить результат в JSON."""
@@ -330,9 +360,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
     def open_braille_input(self) -> None:
         if self.braille_window is None:
-            self.braille_window = BrailleWindow(
-                target_widget=self.inpText, parent=self
-            )
+            self.braille_window = BrailleWindow(target_widget=self.inpText, parent=self)
         self.braille_window.show()
         self.braille_window.raise_()
         self.braille_window.activateWindow()
@@ -360,8 +388,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
         def tone(duration: float) -> list[float]:
             n = int(sample_rate * duration)
             return [
-                0.5 * math.sin(2 * math.pi * freq * i / sample_rate)
-                for i in range(n)
+                0.5 * math.sin(2 * math.pi * freq * i / sample_rate) for i in range(n)
             ]
 
         def silence(duration: float) -> list[float]:
@@ -395,10 +422,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             w.setsampwidth(2)
             w.setframerate(sample_rate)
             frames = b"".join(
-                struct.pack(
-                    "<h", int(max(-1.0, min(1.0, s)) * 32767)
-                )
-                for s in samples
+                struct.pack("<h", int(max(-1.0, min(1.0, s)) * 32767)) for s in samples
             )
             w.writeframes(frames)
 
@@ -463,18 +487,10 @@ class MainWindow(QMainWindow, Ui_MainWindow):
             f"В тексте есть символы, отсутствующие в алфавите "
             f"«{display}»:\n{sample}{more}"
         )
-        btn_abort = box.addButton(
-            "До первой ошибки", QMessageBox.ButtonRole.AcceptRole
-        )
-        btn_ignore = box.addButton(
-            "Игнорировать", QMessageBox.ButtonRole.ActionRole
-        )
-        btn_replace = box.addButton(
-            "Заменить", QMessageBox.ButtonRole.ActionRole
-        )
-        btn_cancel = box.addButton(
-            "Отмена", QMessageBox.ButtonRole.RejectRole
-        )
+        btn_abort = box.addButton("До первой ошибки", QMessageBox.ButtonRole.AcceptRole)
+        btn_ignore = box.addButton("Игнорировать", QMessageBox.ButtonRole.ActionRole)
+        btn_replace = box.addButton("Заменить", QMessageBox.ButtonRole.ActionRole)
+        btn_cancel = box.addButton("Отмена", QMessageBox.ButtonRole.RejectRole)
         box.exec()
 
         clicked = box.clickedButton()
@@ -536,11 +552,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                     obj = Braille(alphabet_path, text, policy=policy)
                 case 4:
                     key = f.alphabetCombo.currentData()
-                    enc = (
-                        alphabet_file("binary", key)
-                        if key.endswith(".json")
-                        else key
-                    )
+                    enc = alphabet_file("binary", key) if key.endswith(".json") else key
                     obj = Bytes(text, enc, policy=policy)
                     obj.set_direction(direction)
                     return obj._check_unknown_chars()
@@ -580,9 +592,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
         alphabet_path = self._alphabet_path_for(f, type_ind)
         try:
-            unknown = self._probe_unknown(
-                type_ind, f, text, alphabet_path, base_policy
-            )
+            unknown = self._probe_unknown(type_ind, f, text, alphabet_path, base_policy)
         except UnknownSymbolPolicyError as e:
             chosen = self._ask_unknown_policy([e.symbol], alphabet_path)
             if chosen is None:
@@ -684,9 +694,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
             case 1:  # Системы счисления
                 return NumberSystem(
-                    alphabet_file(
-                        "number_systems", f.alphabetCombo.currentData()
-                    ),
+                    alphabet_file("number_systems", f.alphabetCombo.currentData()),
                     f.inpSpin.value(),
                     f.operSpin.value(),
                     text,
@@ -723,11 +731,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 
             case 4:  # Бинарный код
                 key = f.alphabetCombo.currentData()
-                enc = (
-                    alphabet_file("binary", key)
-                    if key.endswith(".json")
-                    else key
-                )
+                enc = alphabet_file("binary", key) if key.endswith(".json") else key
                 binary = Bytes(text, enc, policy=effective_policy)
                 return binary.code() if code_radio else binary.encode()
 
@@ -764,9 +768,7 @@ class MainWindow(QMainWindow, Ui_MainWindow):
                     return
 
                 try:
-                    text = self._run_action(
-                        type_ind, f, text, effective_policy
-                    )
+                    text = self._run_action(type_ind, f, text, effective_policy)
                     if type_ind == 0:
                         has_morse = True
                 except UnknownSymbolPolicyError as e:
@@ -812,9 +814,18 @@ class MainWindow(QMainWindow, Ui_MainWindow):
 # ============================================================
 
 if __name__ == "__main__":
+    from PyQt6.QtGui import QIcon
+    import ctypes
+
+    myappid = "morsi.multiconverter.beta.0.1"
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+
+    init_external_alphabets()
     update_alphabets()
+
     app = QApplication(sys.argv)
     app.setStyle("fusion")
+    app.setWindowIcon(QIcon(resource_path("MConv.ico")))
 
     load_settings()
 

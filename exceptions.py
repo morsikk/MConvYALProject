@@ -2,6 +2,7 @@
 #   exceptions.py — кастомные исключения приложения
 # ============================================================
 
+
 class ActionError(Exception):
     """
     База для всех ошибок модуля actions.
@@ -41,9 +42,7 @@ class UnknownSymbolError(ActionError):
         partial_out: уже закодированная часть результата.
     """
 
-    def __init__(
-        self, symbol: str, alphabet_path: str, partial_out: str = ""
-    ) -> None:
+    def __init__(self, symbol: str, alphabet_path: str, partial_out: str = "") -> None:
         super().__init__(
             f"Символ {symbol!r} отсутствует в алфавите «{alphabet_path}». "
             f"Политика: до первой ошибки."
@@ -66,8 +65,7 @@ class InvalidAlphabetError(ActionError):
 
     def __init__(self, path: str, missing: list[str]) -> None:
         super().__init__(
-            f"Некорректный алфавит '{path}': "
-            f"отсутствуют или пусты поля {missing}"
+            f"Некорректный алфавит '{path}': " f"отсутствуют или пусты поля {missing}"
         )
         self.path = path
         self.missing = missing

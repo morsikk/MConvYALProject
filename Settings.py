@@ -15,7 +15,6 @@ import os
 
 from Paths import data_path
 
-
 # ------------------------------------------------------------
 #   Файл и дефолты
 # ------------------------------------------------------------
@@ -26,16 +25,16 @@ SETTINGS_FILE: str = data_path("settings.json")
 # или в нём нет нужного ключа.
 DEFAULT_SETTINGS: dict = {
     # ---------- ПРИЛОЖЕНИЕ ----------
-    "theme": "Системная",               # Системная | Светлая | Тёмная
-    "version": "beta.0.0",              # НЕИЗМЕНЯЕМО
+    "theme": "Системная",  # Системная | Светлая | Тёмная
+    "version": "beta.0.1",  # НЕИЗМЕНЯЕМО
     # ---------- КОНВЕРТАЦИЯ ----------
-    "und_char_pol": "Предупреждение",   # Предупреждение | Игнорировать | Заменить
-    "replacement": "?",                 # Символ для замены
-    "case_sensitive": False,            # Регистрозависимость
+    "und_char_pol": "Предупреждение",  # Предупреждение | Игнорировать | Заменить
+    "replacement": "?",  # Символ для замены
+    "case_sensitive": False,  # Регистрозависимость
     # --- Морзе → звук ---
-    "morse_freq": 800,                  # Частота звука, Гц
-    "morse_sample_rate": 44100,         # Частота дискретизации, Гц
-    "morse_wpm": 25,                    # Слов в минуту
+    "morse_freq": 800,  # Частота звука, Гц
+    "morse_sample_rate": 44100,  # Частота дискретизации, Гц
+    "morse_wpm": 25,  # Слов в минуту
 }
 
 # Глобальный словарь. Заполняется load_settings() при старте.
@@ -45,6 +44,7 @@ SETTINGS: dict = dict(DEFAULT_SETTINGS)
 # ------------------------------------------------------------
 #   Загрузка / сохранение / сброс
 # ------------------------------------------------------------
+
 
 def load_settings() -> dict:
     """Прочитать settings.json (если есть) поверх дефолтов."""
@@ -120,15 +120,14 @@ class UnknownPolicy:
         case_sensitive: bool | None = None,
     ) -> None:
         self.mode = (
-            mode if mode is not None
-            else SETTINGS.get("und_char_pol", POLICY_WARN)
+            mode if mode is not None else SETTINGS.get("und_char_pol", POLICY_WARN)
         )
         self.replacement = (
-            replacement if replacement is not None
-            else SETTINGS.get("replacement", "")
+            replacement if replacement is not None else SETTINGS.get("replacement", "")
         )
         self.case_sensitive = (
-            case_sensitive if case_sensitive is not None
+            case_sensitive
+            if case_sensitive is not None
             else bool(SETTINGS.get("case_sensitive", False))
         )
         if self.mode not in VALID_POLICIES:

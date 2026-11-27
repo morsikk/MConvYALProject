@@ -8,10 +8,10 @@ from fractions import Fraction
 import Exceptions as exs
 from Settings import UnknownPolicy
 
-
 # ============================================================
 #   Action — базовый класс
 # ============================================================
+
 
 class Action:
     """Базовый класс: загрузка алфавита, хранение входа и выхода."""
@@ -45,6 +45,7 @@ class Action:
 # ============================================================
 #   AlphabetAction — общий слой над "letters"
 # ============================================================
+
 
 class AlphabetAction(Action):
     """
@@ -225,6 +226,7 @@ class AlphabetAction(Action):
 #   _OperIsCode — если у наследника нет своего oper(), он равен code()
 # ============================================================
 
+
 class _OperIsCode(AlphabetAction):
     """Примесь: oper() по умолчанию вызывает code()."""
 
@@ -238,6 +240,7 @@ class _OperIsCode(AlphabetAction):
 # ============================================================
 #   Morse
 # ============================================================
+
 
 class Morse(_OperIsCode):
     """Азбука Морзе: code() — в Морзе, encode() — обратно."""
@@ -354,6 +357,7 @@ class Morse(_OperIsCode):
 # ============================================================
 #   NumberSystem
 # ============================================================
+
 
 class NumberSystem(_OperIsCode):
     """
@@ -551,6 +555,7 @@ class NumberSystem(_OperIsCode):
 #   Braille
 # ============================================================
 
+
 class Braille(_OperIsCode):
     """Шрифт Брайля: code() — в Брайль, encode() — обратно."""
 
@@ -569,7 +574,9 @@ class Braille(_OperIsCode):
         prefixes = self.alphabet.get("prefixes") or {}
         self._num_prefix: str | None = self._prefix_char(prefixes, "num_prefix")
         self._cap_prefix: str | None = self._prefix_char(prefixes, "capital_prefix")
-        self._cap_word_prefix: str | None = self._prefix_char(prefixes, "capital_word_prefix")
+        self._cap_word_prefix: str | None = self._prefix_char(
+            prefixes, "capital_word_prefix"
+        )
 
         self._letter_to_code: dict[str, str] = {}
         self._digit_to_code: dict[str, str] = {}
@@ -791,7 +798,11 @@ class Braille(_OperIsCode):
                 num_mode = False
                 out_sym = self._decode_code(code, False)
 
-            if out_sym is not None and out_sym.isalpha() and (cap_mode or cap_word_mode):
+            if (
+                out_sym is not None
+                and out_sym.isalpha()
+                and (cap_mode or cap_word_mode)
+            ):
                 out_sym = out_sym.upper()
             cap_mode = False
 
@@ -831,6 +842,7 @@ class Braille(_OperIsCode):
 # ============================================================
 #   Bytes
 # ============================================================
+
 
 class Bytes(AlphabetAction):
     """
@@ -947,9 +959,9 @@ class Bytes(AlphabetAction):
         if self._custom:
             chunk_len = self._bytes_per_char * 8
             if len(bits) % chunk_len:
-                return [bits[-(len(bits) % chunk_len):]]
+                return [bits[-(len(bits) % chunk_len) :]]
             for i in range(0, len(bits), chunk_len):
-                chunk = bits[i:i + chunk_len]
+                chunk = bits[i : i + chunk_len]
                 if chunk in seen:
                     continue
                 seen.add(chunk)
@@ -958,9 +970,9 @@ class Bytes(AlphabetAction):
             return unknown
 
         if len(bits) % 8:
-            return [bits[-(len(bits) % 8):]]
+            return [bits[-(len(bits) % 8) :]]
         for i in range(0, len(bits), 8):
-            byte = bits[i:i + 8]
+            byte = bits[i : i + 8]
             if byte in seen:
                 continue
             seen.add(byte)
@@ -991,7 +1003,7 @@ class Bytes(AlphabetAction):
                 continue
 
             # code — строка длиной N*8, разбиваем на 8-битные куски
-            bytes_split = [code[i:i + 8] for i in range(0, len(code), 8)]
+            bytes_split = [code[i : i + 8] for i in range(0, len(code), 8)]
             out_chunks.extend(bytes_split)
 
         return self._finish(self.BYTE_SEP.join(out_chunks))
@@ -1024,7 +1036,7 @@ class Bytes(AlphabetAction):
             )
         out_chars: list[str] = []
         for i in range(0, len(bits), chunk_len):
-            chunk = bits[i:i + chunk_len]
+            chunk = bits[i : i + chunk_len]
             ch = self._code_to_char.get(chunk)
             if ch is None:
                 repl = self._resolve_unknown(chunk, partial_out="".join(out_chars))
@@ -1042,10 +1054,8 @@ class Bytes(AlphabetAction):
         if not bits:
             return self._finish("")
         if len(bits) % 8:
-            raise exs.ActionError(
-                f"Длина битовой строки ({len(bits)}) не кратна 8"
-            )
-        data = bytes(int(bits[i:i + 8], 2) for i in range(0, len(bits), 8))
+            raise exs.ActionError(f"Длина битовой строки ({len(bits)}) не кратна 8")
+        data = bytes(int(bits[i : i + 8], 2) for i in range(0, len(bits), 8))
         try:
             result = data.decode(self.enc)
         except UnicodeDecodeError as exc:
@@ -1061,6 +1071,7 @@ class Bytes(AlphabetAction):
 # ============================================================
 #   Caesar
 # ============================================================
+
 
 class Caesar(_OperIsCode):
     """Шифр Цезаря."""
@@ -1122,6 +1133,7 @@ class Caesar(_OperIsCode):
 # ============================================================
 #   A1Z26
 # ============================================================
+
 
 class A1Z26(_OperIsCode):
     """Буква <-> её номер в алфавите."""
@@ -1243,6 +1255,7 @@ class A1Z26(_OperIsCode):
 #   Vigenere
 # ============================================================
 
+
 class Vigenere(_OperIsCode):
     """Шифр Виженёра над произвольным алфавитом."""
 
@@ -1313,6 +1326,7 @@ class Vigenere(_OperIsCode):
 #   Atbash
 # ============================================================
 
+
 class Atbash(_OperIsCode):
     """Шифр Атбаш (инволюция: code == encode)."""
 
@@ -1360,6 +1374,7 @@ class Atbash(_OperIsCode):
 #   Playfair
 # ============================================================
 
+
 class Playfair(_OperIsCode):
     """Биграммный шифр Плейфера."""
 
@@ -1396,7 +1411,9 @@ class Playfair(_OperIsCode):
 
         # Playfair работает в верхнем регистре
         letters = self.alphabet["letters"]
-        self._char_to_idx: dict[str, int] = {ch.upper(): i for i, ch in enumerate(letters)}
+        self._char_to_idx: dict[str, int] = {
+            ch.upper(): i for i, ch in enumerate(letters)
+        }
         self._idx_to_char: list[str] = [ch.upper() for ch in letters]
 
         n_cells = sum(1 for ch in self._idx_to_char if ch not in self._aliases)
@@ -1525,8 +1542,7 @@ class Playfair(_OperIsCode):
             )
 
         self._table: list[list[str]] = [
-            ordered[r * self.cols : (r + 1) * self.cols]
-            for r in range(self.rows)
+            ordered[r * self.cols : (r + 1) * self.cols] for r in range(self.rows)
         ]
         self._pos: dict[str, tuple[int, int]] = {
             self._table[r][c]: (r, c)
@@ -1629,6 +1645,7 @@ class Playfair(_OperIsCode):
 #   Reverse — переворот строки
 # ============================================================
 
+
 class Reverse(_OperIsCode):
     """
     Переворот строки задом наперёд (инволюция: code == encode).
@@ -1669,6 +1686,7 @@ class Reverse(_OperIsCode):
 #   ColumnarTransposition — транспонирование по столбцам
 # ============================================================
 
+
 class ColumnarTransposition(_OperIsCode):
     """
     Транспонирование по столбцам (columnar transposition).
@@ -1694,9 +1712,7 @@ class ColumnarTransposition(_OperIsCode):
         self._require_str_letters()
 
         if cols < 1:
-            raise exs.ActionError(
-                f"Ширина таблицы должна быть >= 1 (получено {cols})"
-            )
+            raise exs.ActionError(f"Ширина таблицы должна быть >= 1 (получено {cols})")
         self.cols: int = int(cols)
 
     # ---------- вспомогательное ----------

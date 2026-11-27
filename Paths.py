@@ -2,10 +2,7 @@
 #   Paths.py — пути к ресурсам/данным и синхронизация alphabets.json
 # ============================================================
 
-import json
-import os
-import sys
-
+import json, sys, os, shutil
 
 # ============================================================
 #   Константы по умолчанию
@@ -13,21 +10,20 @@ import sys
 
 # Шифры, которые автоматически добавляются в блок "ciphers"
 DEFAULT_CIPHERS: dict[str, dict] = {
-    "caesar":   {"name": "Шифр Цезаря"},
+    "caesar": {"name": "Шифр Цезаря"},
     "vigenere": {"name": "Шифр Виженёра"},
-    "A1Z26":    {"name": "Шифр A1Z26"},
-    "atbash":   {"name": "Шифр Атбаш"},
+    "A1Z26": {"name": "Шифр A1Z26"},
+    "atbash": {"name": "Шифр Атбаш"},
     "playfair": {"name": "Шифр Плейфера"},
-    "reverse":  {"name": "Переворот строки"},
+    "reverse": {"name": "Переворот строки"},
     "columnar": {"name": "Транспонирование по столбцам"},
 }
 
 # Бинарные кодировки, которые автоматически добавляются в блок "binary"
 DEFAULT_BINARY: dict[str, dict] = {
-    "utf-8":  {"name": "UTF-8"},
+    "utf-8": {"name": "UTF-8"},
     "utf-16": {"name": "UTF-16"},
 }
-
 
 # ============================================================
 #   Базовые пути
@@ -43,7 +39,6 @@ def base_dir() -> str:
         return os.path.dirname(os.path.abspath(sys.executable))
     return os.path.dirname(os.path.abspath(__file__))
 
-
 def resource_path(relative: str) -> str:
     """
     Абсолютный путь к РЕСУРСУ, упакованному в exe (read-only).
@@ -57,13 +52,11 @@ def resource_path(relative: str) -> str:
         root = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(root, *relative.split("/"))
 
-
 def data_path(relative: str) -> str:
     """
     Абсолютный путь к ИЗМЕНЯЕМОМУ файлу рядом с exe (или скриптом).
     """
     return os.path.join(base_dir(), *relative.split("/"))
-
 
 def alphabet_file(subdir: str, filename: str) -> str:
     """
@@ -78,23 +71,26 @@ def alphabet_file(subdir: str, filename: str) -> str:
             return path
     return resource_path(relative)
 
-
 # ============================================================
 #   Синхронизация alphabets.json
 # ============================================================
 
 def update_alphabets(folder_path: str = "alphabets") -> None:
     """
-    Синхронизировать alphabets.json с реальными файлами в папке alphabets.
-
-    - для каждой подпапки (morse, braille, binary, number_systems, ciphers)
-      блок перезаписывается списком файлов с диска;
-    - для 'ciphers' дополнительно гарантируются DEFAULT_CIPHERS;
-    - для 'binary' дополнительно гарантируются DEFAULT_BINARY.
+    Синхронизировать alphabets.json с реальными файлами.
+    
+    Приоритет: внешняя папка (data_path), если её нет — внутренняя (resource_path).
     """
-    base_path = resource_path(folder_path)
-    json_path = data_path(f"{folder_path}/alphabets.json")
+    # Ищем папку с алфавитами: сначала внешнюю, потом внутреннюю
+    external_path = data_path(folder_path)
+    internal_path = resource_path(folder_path)
+    
+    if os.path.isdir(external_path):
+        base_path = external_path
+    else:
+        base_path = internal_path
 
+    json_path = data_path(f"{folder_path}/alphabets.json")
     alphabets_data = _load_json(json_path) or {}
 
     if os.path.isdir(base_path):
@@ -102,6 +98,11 @@ def update_alphabets(folder_path: str = "alphabets") -> None:
             subfolder = os.path.join(base_path, entry)
             if not os.path.isdir(subfolder):
                 continue
+                
+            # Пропускаем служебные файлы, если вдруг попались
+            if entry.startswith('.'):
+                continue
+
             disk_entries = _collect_entries_from_json(subfolder)
             if entry == "ciphers":
                 _sync_ciphers(alphabets_data, disk_entries)
@@ -117,7 +118,6 @@ def update_alphabets(folder_path: str = "alphabets") -> None:
 
     _save_json(json_path, alphabets_data)
 
-
 def _sync_ciphers(alphabets_data: dict, disk_entries: dict) -> None:
     """
     Обновить блок 'ciphers': alps — с диска, дефолтные шифры — принудительно.
@@ -128,7 +128,6 @@ def _sync_ciphers(alphabets_data: dict, disk_entries: dict) -> None:
     ciphers_block["alps"] = disk_entries
     ciphers_block.update(DEFAULT_CIPHERS)
     alphabets_data["ciphers"] = ciphers_block
-
 
 def _collect_entries_from_json(folder: str) -> dict[str, dict]:
     """
@@ -155,7 +154,6 @@ def _collect_entries_from_json(folder: str) -> dict[str, dict]:
             result[filename] = {"name": None}
     return result
 
-
 # ============================================================
 #   Внутренние хелперы JSON
 # ============================================================
@@ -171,9 +169,28 @@ def _load_json(path: str) -> dict | None:
         print(f"⚠ Ошибка чтения {path}: {e}")
         return None
 
-
 def _save_json(path: str, data: dict) -> None:
     """Сохранить JSON-объект; создать родительскую папку при необходимости."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+def init_external_alphabets() -> None:
+    """
+    Если папки 'alphabets' нет рядом с exe (или скриптом) —
+    копирует её из ресурсов (_MEIPASS или папки скрипта).
+    Если папка уже есть — ничего не трогает, чтобы не затереть
+    пользовательские алфавиты.
+    """
+    external = data_path("alphabets")
+    if os.path.isdir(external):
+        return  # уже есть, не трогаем
+
+    # Ищем исходную папку с алфавитами
+    internal = resource_path("alphabets")
+    if os.path.isdir(internal):
+        try:
+            shutil.copytree(internal, external)
+            print(f"✓ Создана папка с алфавитами рядом с программой: {external}")
+        except OSError as e:
+            print(f"⚠ Не удалось скопировать alphabets: {e}")

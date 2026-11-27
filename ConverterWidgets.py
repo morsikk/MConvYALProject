@@ -6,29 +6,61 @@ import json, sys, os, re
 from pathlib import Path
 
 from PyQt6.QtWidgets import (
-    QApplication, QPushButton, QDialogButtonBox, QListWidgetItem,
-    QWidget, QVBoxLayout, QPlainTextEdit, QLabel, QScrollArea,
-    QMenuBar, QMenu, QStatusBar, QDialog, QListWidget, QFormLayout,
-    QComboBox, QFrame, QStackedWidget, QHBoxLayout, QSplitter,
-    QLineEdit, QSpinBox, QMainWindow, QRadioButton, QSlider,
-    QSizePolicy, QGridLayout, QMessageBox, QTableWidget,
-    QHeaderView, QTableWidgetItem, QFileDialog,
-    QStyledItemDelegate, QTextEdit, QCheckBox
+    QApplication,
+    QPushButton,
+    QDialogButtonBox,
+    QListWidgetItem,
+    QWidget,
+    QVBoxLayout,
+    QPlainTextEdit,
+    QLabel,
+    QScrollArea,
+    QMenuBar,
+    QMenu,
+    QStatusBar,
+    QDialog,
+    QListWidget,
+    QFormLayout,
+    QComboBox,
+    QFrame,
+    QStackedWidget,
+    QHBoxLayout,
+    QSplitter,
+    QLineEdit,
+    QSpinBox,
+    QMainWindow,
+    QRadioButton,
+    QSlider,
+    QSizePolicy,
+    QGridLayout,
+    QMessageBox,
+    QTableWidget,
+    QHeaderView,
+    QTableWidgetItem,
+    QFileDialog,
+    QStyledItemDelegate,
+    QTextEdit,
+    QCheckBox,
 )
 from PyQt6.QtCore import QSize, Qt, pyqtSignal, QUrl, QEvent, QRegularExpression
 from PyQt6.QtGui import (
-    QFont, QPalette, QColor, QKeyEvent, QRegularExpressionValidator,
-    QTextOption, QAction
+    QFont,
+    QPalette,
+    QColor,
+    QKeyEvent,
+    QRegularExpressionValidator,
+    QTextOption,
+    QAction,
 )
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 
 from Paths import data_path, resource_path
 from Settings import save_settings, reset_settings, SETTINGS, DEFAULT_SETTINGS
 
-
 # ============================================================
 #   ТЕМА: определение, палитры, QSS
 # ============================================================
+
 
 def detect_system_theme() -> str:
     """Системная схема: 'light' / 'dark' (fallback — 'dark')."""
@@ -145,6 +177,7 @@ def build_app_qss(p: dict[str, str]) -> str:
     Пути к SVG разрешаются через resource_path() и приводятся к '/' —
     иначе Qt ищет url() относительно cwd и в exe иконки не находятся.
     """
+
     def _rp(key: str) -> str:
         return resource_path(p[key]).replace("\\", "/")
 
@@ -357,6 +390,7 @@ def apply_theme() -> None:
 #   Хелперы для statusbar
 # ============================================================
 
+
 def _status(widget: QWidget | None, message: str, timeout_ms: int = 0) -> None:
     """Показать сообщение в статусбаре окна-владельца (если он есть)."""
     if widget is None:
@@ -372,6 +406,7 @@ def _status(widget: QWidget | None, message: str, timeout_ms: int = 0) -> None:
 # ============================================================
 #   OperationForm — форма параметров операции
 # ============================================================
+
 
 class OperationForm(QWidget):
     """
@@ -473,6 +508,7 @@ class OperationForm(QWidget):
 #   Ui_MainWindow — сборка главного окна
 # ============================================================
 
+
 class Ui_MainWindow:
     """Строитель интерфейса главного окна."""
 
@@ -512,9 +548,7 @@ class Ui_MainWindow:
         self.inpText = QPlainTextEdit(parent=self.inpTextWidget)
         self.inpText.setObjectName("inpText")
         self.inpText.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
-        self.inpText.setWordWrapMode(
-            QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere
-        )
+        self.inpText.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
         self.inpTextVLayout.addWidget(self.inpText)
 
         # actions
@@ -569,9 +603,7 @@ class Ui_MainWindow:
         self.outText.setReadOnly(True)
         self.outText.setObjectName("outText")
         self.outText.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
-        self.outText.setWordWrapMode(
-            QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere
-        )
+        self.outText.setWordWrapMode(QTextOption.WrapMode.WrapAtWordBoundaryOrAnywhere)
         self.outTextVLayout.addWidget(self.outText)
 
         self.workspace.addWidget(self.inpTextWidget)
@@ -650,9 +682,7 @@ class Ui_MainWindow:
         self.makeMorseAction.setObjectName("makeMorseAction")
         self.makeAlphabetAction.addAction(self.makeMorseAction)
 
-        self.makeNumSysAction = QAction(
-            "Системы счисления", parent=MainWindow
-        )
+        self.makeNumSysAction = QAction("Системы счисления", parent=MainWindow)
         self.makeNumSysAction.setObjectName("makeNumSysAction")
         self.makeAlphabetAction.addAction(self.makeNumSysAction)
 
@@ -680,6 +710,7 @@ class Ui_MainWindow:
 #   ActionWidget — карточка одного действия
 # ============================================================
 
+
 class ActionWidget(QWidget):
     """Виджет одного действия в списке."""
 
@@ -690,18 +721,23 @@ class ActionWidget(QWidget):
     ALPHABETS_JSON = "alphabets/alphabets.json"
 
     CIPHER_KEYS: list[str] = [
-        "caesar", "vigenere", "A1Z26", "atbash", "playfair",
-        "reverse", "columnar",
+        "caesar",
+        "vigenere",
+        "A1Z26",
+        "atbash",
+        "playfair",
+        "reverse",
+        "columnar",
     ]
 
     # Какие поля показывать для каждого шифра
     CIPHER_FIELDS: dict[str, tuple[str, ...]] = {
-        "caesar":   ("operCombo", "alphabetCombo", "operSpin", "direction"),
+        "caesar": ("operCombo", "alphabetCombo", "operSpin", "direction"),
         "vigenere": ("operCombo", "alphabetCombo", "keyEdit", "direction"),
-        "A1Z26":    ("operCombo", "alphabetCombo", "direction"),
-        "atbash":   ("operCombo", "alphabetCombo", "direction"),
+        "A1Z26": ("operCombo", "alphabetCombo", "direction"),
+        "atbash": ("operCombo", "alphabetCombo", "direction"),
         "playfair": ("operCombo", "alphabetCombo", "keyEdit", "direction"),
-        "reverse":  ("operCombo", "direction"),
+        "reverse": ("operCombo", "direction"),
         "columnar": ("operCombo", "alphabetCombo", "operSpin", "direction"),
     }
 
@@ -833,7 +869,8 @@ class ActionWidget(QWidget):
         label, _ = f._rows["operSpin"]
         if label is not None:
             label.setText(
-                "Сдвиг:" if cipher_key in ("caesar", "columnar") is False
+                "Сдвиг:"
+                if cipher_key in ("caesar", "columnar") is False
                 else ("Сдвиг:" if cipher_key == "caesar" else "Символов в строке:")
             )
 
@@ -932,6 +969,7 @@ class ActionWidget(QWidget):
 #   Настройки: страницы, диалог
 # ============================================================
 
+
 class SettingsPage(QWidget):
     """
     Базовый каркас страницы настроек:
@@ -1011,9 +1049,7 @@ class GeneralPage(SettingsPage):
         idx = self.themeCombo.findText(theme)
         if idx >= 0:
             self.themeCombo.setCurrentIndex(idx)
-        self.versionLabel.setText(
-            SETTINGS.get("version", DEFAULT_SETTINGS["version"])
-        )
+        self.versionLabel.setText(SETTINGS.get("version", DEFAULT_SETTINGS["version"]))
 
     def save(self) -> dict:
         return {"theme": self.themeCombo.currentText()}
@@ -1028,9 +1064,7 @@ class ConversionPage(SettingsPage):
         super().__init__()
 
         self.undCharPolCombo = QComboBox()
-        self.undCharPolCombo.addItems(
-            ["Предупреждение", "Игнорировать", "Заменить"]
-        )
+        self.undCharPolCombo.addItems(["Предупреждение", "Игнорировать", "Заменить"])
         self.add_row("Действие с неизвестным символом:", self.undCharPolCombo)
 
         self.replacementEdit = QLineEdit()
@@ -1096,8 +1130,9 @@ class ConversionPage(SettingsPage):
             int(SETTINGS.get("morse_freq", DEFAULT_SETTINGS["morse_freq"]))
         )
         self.morseRateSpin.setValue(
-            int(SETTINGS.get("morse_sample_rate",
-                             DEFAULT_SETTINGS["morse_sample_rate"]))
+            int(
+                SETTINGS.get("morse_sample_rate", DEFAULT_SETTINGS["morse_sample_rate"])
+            )
         )
         self.morseWpmSpin.setValue(
             int(SETTINGS.get("morse_wpm", DEFAULT_SETTINGS["morse_wpm"]))
@@ -1240,8 +1275,7 @@ class ImportAlphabetDialog(QDialog):
         layout.addWidget(self.combo)
 
         self.buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok
-            | QDialogButtonBox.StandardButton.Cancel,
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
             parent=self,
         )
         self.buttons.accepted.connect(self.accept)
@@ -1257,14 +1291,13 @@ class ImportAlphabetDialog(QDialog):
 #   Кнопки и мини-плеер
 # ============================================================
 
+
 class SquareButton(QPushButton):
     """Квадратная кнопка, тянущаяся по высоте родителя."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setSizePolicy(
-            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
-        )
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
         self.setMinimumSize(24, 24)
 
     def hasHeightForWidth(self) -> bool:
@@ -1291,9 +1324,7 @@ class MiniPlayer(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("miniPlayer")
-        self.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         self.player = QMediaPlayer()
         self.audio = QAudioOutput()
@@ -1371,12 +1402,11 @@ class MiniPlayer(QWidget):
 #   Делегаты / валидаторы
 # ============================================================
 
+
 class OneCharDelegate(QStyledItemDelegate):
     """Редактор ячейки — ровно один символ."""
 
-    def createEditor(
-        self, parent: QWidget, option, index
-    ) -> QLineEdit:
+    def createEditor(self, parent: QWidget, option, index) -> QLineEdit:
         ed = QLineEdit(parent)
         ed.setMaxLength(1)
         return ed
@@ -1398,6 +1428,7 @@ class MorseCodeValidator(QRegularExpressionValidator):
 # ============================================================
 #   Базовое окно создания алфавита
 # ============================================================
+
 
 class BaseAlphabetDialog(QDialog):
     """
@@ -1450,9 +1481,7 @@ class BaseAlphabetDialog(QDialog):
 
         # --- Таблица ключ-значение ---
         self.table = QTableWidget(0, 2)
-        self.table.setHorizontalHeaderLabels(
-            [self.key_header, self.value_header]
-        )
+        self.table.setHorizontalHeaderLabels([self.key_header, self.value_header])
         self.table.horizontalHeader().setSectionResizeMode(
             0, QHeaderView.ResizeMode.ResizeToContents
         )
@@ -1472,8 +1501,7 @@ class BaseAlphabetDialog(QDialog):
         self._vbox.addLayout(btn_row)
 
         self.buttonBox = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok
-            | QDialogButtonBox.StandardButton.Cancel
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         self.buttonBox.accepted.connect(self._on_accept)
         self.buttonBox.rejected.connect(self._on_reject)
@@ -1523,9 +1551,7 @@ class BaseAlphabetDialog(QDialog):
         _status(self, "Строка добавлена", 1500)
 
     def _remove_row(self) -> None:
-        rows = sorted(
-            {i.row() for i in self.table.selectedIndexes()}, reverse=True
-        )
+        rows = sorted({i.row() for i in self.table.selectedIndexes()}, reverse=True)
         if not rows:
             _status(self, "Не выбрано ни одной строки для удаления", 2000)
             return
@@ -1592,9 +1618,7 @@ class BaseAlphabetDialog(QDialog):
                 _status(self, f"Ошибка: строка {r+1} — пустой ключ", 3000)
                 return
             if key in seen:
-                QMessageBox.warning(
-                    self, "Ошибка", f"Дублирующийся ключ: {key!r}"
-                )
+                QMessageBox.warning(self, "Ошибка", f"Дублирующийся ключ: {key!r}")
                 _status(self, f"Ошибка: дублирующийся ключ {key!r}", 3000)
                 return
             seen.add(key)
@@ -1624,6 +1648,7 @@ class BaseAlphabetDialog(QDialog):
 # ============================================================
 #   Диалоги алфавитов: шифр / Морзе
 # ============================================================
+
 
 class CipherAlphabetDialog(BaseAlphabetDialog):
     """
@@ -1655,9 +1680,7 @@ class CipherAlphabetDialog(BaseAlphabetDialog):
         initial: dict | None = None,
         default_filename: str = "",
     ) -> None:
-        super().__init__(
-            parent, initial=initial, default_filename=default_filename
-        )
+        super().__init__(parent, initial=initial, default_filename=default_filename)
         self.table.setItemDelegateForColumn(0, OneCharDelegate(self.table))
 
     def _default_filename(self) -> str:
@@ -1770,9 +1793,7 @@ class CipherAlphabetDialog(BaseAlphabetDialog):
             alias = self._read_row_value(r).strip()
             if alias:
                 if len(alias) != 1:
-                    raise ValueError(
-                        f"Строка {r+1}: алиас должен быть одним знаком."
-                    )
+                    raise ValueError(f"Строка {r+1}: алиас должен быть одним знаком.")
                 aliases[key] = alias
             else:
                 letters_list.append(key)
@@ -1912,6 +1933,7 @@ class CipherAlphabetDialog(BaseAlphabetDialog):
 
 class MorseAlphabetDialog(CipherAlphabetDialog):
     """Диалог создания Морзе-алфавита."""
+
     _mode = "morse"
     alphabet_type = "morse"
     save_subdir = "alphabets/morse"
@@ -1949,6 +1971,7 @@ class MorseAlphabetDialog(CipherAlphabetDialog):
 
 class CipherAlphaDialog(CipherAlphabetDialog):
     """Диалог создания алфавита для шифров подстановки."""
+
     _mode = "cipher"
     alphabet_type = "cipher"
     save_subdir = "alphabets/ciphers"
@@ -1959,6 +1982,7 @@ class CipherAlphaDialog(CipherAlphabetDialog):
 # ============================================================
 #   Система счисления
 # ============================================================
+
 
 class NumeralAlphabetDialog(BaseAlphabetDialog):
     """
@@ -2099,9 +2123,7 @@ class BinaryAlphabetDialog(BaseAlphabetDialog):
         bits: list[str] = []
         for p in parts:
             if len(p) != 2:
-                raise ValueError(
-                    f"HEX-байт {p!r} должен состоять из двух цифр"
-                )
+                raise ValueError(f"HEX-байт {p!r} должен состоять из двух цифр")
             try:
                 val = int(p, 16)
             except ValueError:
@@ -2120,9 +2142,7 @@ class BinaryAlphabetDialog(BaseAlphabetDialog):
             if not key:
                 raise ValueError(f"Строка {r+1}: пустой символ.")
             if len(key) != 1:
-                raise ValueError(
-                    f"Строка {r+1}: символ должен быть одним знаком."
-                )
+                raise ValueError(f"Строка {r+1}: символ должен быть одним знаком.")
             if key in seen:
                 raise ValueError(f"Дублирующийся символ: {key!r}")
             seen.add(key)
@@ -2158,8 +2178,7 @@ class BinaryAlphabetDialog(BaseAlphabetDialog):
         letters = self._initial.get("letters", {})
         for ch, bits in letters.items():
             hex_parts = [
-                format(int(bits[i:i + 8], 2), "02X")
-                for i in range(0, len(bits), 8)
+                format(int(bits[i : i + 8], 2), "02X") for i in range(0, len(bits), 8)
             ]
             self._add_row(ch, " ".join(hex_parts))
 
@@ -2167,6 +2186,7 @@ class BinaryAlphabetDialog(BaseAlphabetDialog):
 # ============================================================
 #   Брайль: алфавит-диалог и виджет ввода
 # ============================================================
+
 
 class BrailleAlphabetDialog(BaseAlphabetDialog):
     """
@@ -2197,9 +2217,7 @@ class BrailleAlphabetDialog(BaseAlphabetDialog):
         initial: dict | None = None,
         default_filename: str = "",
     ) -> None:
-        super().__init__(
-            parent, initial=initial, default_filename=default_filename
-        )
+        super().__init__(parent, initial=initial, default_filename=default_filename)
         self.table.setItemDelegateForColumn(0, OneCharDelegate(self.table))
         self._rebuild_layout()
 
@@ -2244,12 +2262,8 @@ class BrailleAlphabetDialog(BaseAlphabetDialog):
         self.nameEdit.setPlaceholderText("например, Английский (6-точечный)")
         self.meta_form.addRow("name *:", self.nameEdit)
 
-        self.numPrefixEdit = self._make_prefix_row(
-            "num_prefix *:", "например, ⠼"
-        )
-        self.capPrefixEdit = self._make_prefix_row(
-            "capital_prefix *:", "например, ⠠"
-        )
+        self.numPrefixEdit = self._make_prefix_row("num_prefix *:", "например, ⠼")
+        self.capPrefixEdit = self._make_prefix_row("capital_prefix *:", "например, ⠠")
         self.capWordPrefixEdit = self._make_prefix_row(
             "capital_word_prefix *:", "например, ⠠⠠"
         )
@@ -2366,9 +2380,7 @@ class BrailleAlphabetDialog(BaseAlphabetDialog):
             if not key:
                 raise ValueError(f"Строка {r+1}: пустой символ.")
             if len(key) != 1:
-                raise ValueError(
-                    f"Строка {r+1}: символ должен быть одним знаком."
-                )
+                raise ValueError(f"Строка {r+1}: символ должен быть одним знаком.")
             if key in seen_chars:
                 raise ValueError(f"Дублирующийся символ: {key!r}")
             seen_chars.add(key)
@@ -2382,8 +2394,7 @@ class BrailleAlphabetDialog(BaseAlphabetDialog):
                 )
             if any(not (0x2800 <= ord(ch) <= 0x28FF) for ch in braille):
                 raise ValueError(
-                    f"Строка {r+1}: Брайль-код должен быть символом "
-                    f"U+2800..U+28FF."
+                    f"Строка {r+1}: Брайль-код должен быть символом " f"U+2800..U+28FF."
                 )
             if braille in seen_braille:
                 raise ValueError(
@@ -2418,9 +2429,7 @@ class BrailleAlphabetDialog(BaseAlphabetDialog):
         for ch in braille:
             code = ord(ch)
             if not (0x2800 <= code <= 0x28FF):
-                raise ValueError(
-                    f"Символ {ch!r} не является Брайль-символом Unicode."
-                )
+                raise ValueError(f"Символ {ch!r} не является Брайль-символом Unicode.")
             mask = code - 0x2800
             result.extend(i for i in range(6) if mask & (1 << i))
         return result
@@ -2456,6 +2465,7 @@ class BrailleAlphabetDialog(BaseAlphabetDialog):
 # ============================================================
 #   Брайль: виджет ввода
 # ============================================================
+
 
 class BrailleInputWidget(QWidget):
     """
@@ -2530,9 +2540,9 @@ class BrailleInputWidget(QWidget):
         self._prefixes: dict = {}
 
         # «Намерения» между наборами (Enter их не сбрасывает)
-        self._pending_capital = False       # ⇧ одна буква
+        self._pending_capital = False  # ⇧ одна буква
         self._pending_capital_word = False  # ⇧⇧ до пробела
-        self._pending_number = False        # № до пробела
+        self._pending_number = False  # № до пробела
 
         self._build_ui()
         self._load_alphabet_list()
@@ -2552,9 +2562,7 @@ class BrailleInputWidget(QWidget):
         else:
             top_layout = QHBoxLayout()
             top_layout.addWidget(QLabel("Алфавит Брайля:"))
-            self.alphabet_combo.currentIndexChanged.connect(
-                self._on_alphabet_changed
-            )
+            self.alphabet_combo.currentIndexChanged.connect(self._on_alphabet_changed)
             top_layout.addWidget(self.alphabet_combo, 1)
             main_layout.addLayout(top_layout)
 
@@ -2678,9 +2686,7 @@ class BrailleInputWidget(QWidget):
             ) as fp:
                 data = json.load(fp)
             for filename, meta in data.get("braille", {}).items():
-                self.alphabet_combo.addItem(
-                    meta.get("name", filename), filename
-                )
+                self.alphabet_combo.addItem(meta.get("name", filename), filename)
         except (FileNotFoundError, json.JSONDecodeError) as exc:
             self.alphabet_combo.addItem(f"Ошибка: {exc}", None)
             _status(self, f"Брайль: ошибка загрузки — {exc}", 4000)
@@ -2771,8 +2777,7 @@ class BrailleInputWidget(QWidget):
         self._update_display()
         _status(
             self,
-            f"Брайль: символ зафиксирован "
-            f"(буфер: {len(self._committed_chars)})",
+            f"Брайль: символ зафиксирован " f"(буфер: {len(self._committed_chars)})",
             1500,
         )
 
@@ -2984,8 +2989,7 @@ class BrailleInputWidget(QWidget):
         cur = self._char_for_current()
         if cur and cur != "?":
             self.hint_label.setText(
-                f"Алфавит: {self._alphabet_name}   |   "
-                f"Текущий символ: «{cur}»"
+                f"Алфавит: {self._alphabet_name}   |   " f"Текущий символ: «{cur}»"
             )
         else:
             self.hint_label.setText(f"Алфавит: {self._alphabet_name}")
@@ -3105,9 +3109,7 @@ class BrailleWindow(QWidget):
         self.setWindowTitle("Ввод Брайля")
 
         layout = QVBoxLayout(self)
-        self.braille = BrailleInputWidget(
-            target_widget=target_widget, parent=self
-        )
+        self.braille = BrailleInputWidget(target_widget=target_widget, parent=self)
         layout.addWidget(self.braille)
         self.resize(420, 520)
         _status(self, "Открыто окно ввода Брайля", 2000)
